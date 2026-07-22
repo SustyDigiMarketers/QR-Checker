@@ -630,17 +630,31 @@ async function startServer() {
 
   // 1. Configure Security: CORS with an allowlist instead of wildcard origins
   const allowedOrigins = process.env.ALLOWED_ORIGINS 
-    ? process.env.ALLOWED_ORIGINS.split(',') 
+    ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim()) 
     : ['http://localhost:3000', 'https://localhost:3000', 'http://127.0.0.1:3000'];
+
+  if (process.env.APP_URL) {
+    allowedOrigins.push(process.env.APP_URL.trim());
+  }
+  if (process.env.CORS_ORIGINS) {
+    process.env.CORS_ORIGINS.split(',').forEach(s => allowedOrigins.push(s.trim()));
+  }
 
   const corsOptions = {
     origin: (origin: string | undefined, callback: any) => {
-      // In development or when no origin is provided (e.g. same-origin requests or mobile sync), allow it
-      if (!origin || !isProd || allowedOrigins.includes(origin) || origin.endsWith('.run.app')) {
-        callback(null, true);
-      } else {
-        callback(new Error('CORS Policy: Access denied for specified origin.'), false);
+      // Allow requests without origin (same-origin or direct navigation) or in development
+      if (!origin || !isProd) {
+        return callback(null, true);
       }
+      if (
+        allowedOrigins.includes(origin) || 
+        origin.endsWith('.run.app') || 
+        origin.endsWith('.onrender.com')
+      ) {
+        return callback(null, true);
+      }
+      // If origin is not allowed by policy, disable CORS headers cleanly without throwing a 500 error
+      return callback(null, false);
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -670,7 +684,8 @@ async function startServer() {
             "blob:", 
             "https://images.unsplash.com", 
             "https://*.googleusercontent.com",
-            "https://*.run.app"
+            "https://*.run.app",
+            "https://*.onrender.com"
           ],
           connectSrc: [
             "'self'",
@@ -678,9 +693,10 @@ async function startServer() {
             "wss:",
             "https://*.googleapis.com",
             "https://*.google.com",
-            "https://*.run.app"
+            "https://*.run.app",
+            "https://*.onrender.com"
           ],
-          frameSrc: ["'self'", "https://*.google.com"],
+          frameSrc: ["'self'", "https://*.google.com", "https://*.run.app", "https://*.onrender.com"],
           objectSrc: ["'none'"],
           upgradeInsecureRequests: [],
         },
@@ -4751,9 +4767,52 @@ async function startServer() {
   });
 
 
+  // --- VITE DEV OR PRODUCTION ASSETS SERVING ---
+  if (!isProd) {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+    console.log('[Static Serving] Vite development server middleware loaded.');
+  } else {
+    // Try process.cwd()/dist first, fallback to currentDirname or __dirname/dist
+    let distPath = path.join(process.cwd(), 'dist');
+    if (!fs.existsSync(distPath) && currentDirname) {
+      distPath = path.extname(currentDirname) ? path.dirname(currentDirname) : currentDirname;
+    }
+
+    if (fs.existsSync(distPath)) {
+      console.log(`[Static Serving] Verified production dist directory at: ${distPath}`);
+    } else {
+      console.error(`[Static Serving ERROR] Dist directory missing at resolved path: ${distPath}`);
+    }
+
+    // Serve static files from compiled dist directory
+    app.use(express.static(distPath, {
+      maxAge: '1d',
+      etag: true
+    }));
+
+    // SPA fallback: serve index.html for non-API client routes
+    app.get('*', (req: any, res: any, next: any) => {
+      if (req.path.startsWith('/api') || req.path.startsWith('/uploads')) {
+        return next();
+      }
+      const indexPath = path.join(distPath, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(404).send('CleanCheck client bundle (index.html) not found.');
+      }
+    });
+    console.log('[Static Serving] Production static assets and SPA fallback mounted.');
+  }
+
   // --- CENTRAL ERROR HANDLER MIDDLEWARE ---
+  // MUST be registered AFTER static asset serving and SPA fallback
   app.use((err: any, req: any, res: any, next: any) => {
-    console.error(`[Central Error Handler] Request ID: ${req.id || 'N/A'} - Error:`, err);
+    console.error(`[Central Error Handler] Request ID: ${req.id || 'N/A'} - Path: ${req.path} - Error:`, err);
     
     const status = err.status || err.statusCode || 500;
     const response: any = {
@@ -4770,23 +4829,6 @@ async function startServer() {
 
     res.status(status).json(response);
   });
-
-  // --- VITE DEV OR PRODUCTION ASSETS SERVING ---
-  if (!isProd) {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-    console.log('Vite development server middleware loaded.');
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-    console.log('Production static client files loaded.');
-  }
 
   function startAutomatedBackupScheduler() {
     console.log('[Scheduler] Starting automated daily backup scheduler...');
