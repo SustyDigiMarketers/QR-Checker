@@ -1,0 +1,100 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:6.0
+    container_name: cleancheck_mongodb
+    restart: unless-stopped
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=${MONGO_ROOT_USER:-admin}
+      - MONGO_INITDB_ROOT_PASSWORD=${MONGO_ROOT_PASSWORD:-supersecretmongo}
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - cleancheck_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  cleancheck:
+    image: cleancheck:v1.0.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cleancheck_platform
+    restart: unless-stopped
+    depends_on:
+      - mongodb
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - MONGODB_URI=mongodb://${MONGO_ROOT_USER:-admin}:${MONGO_ROOT_PASSWORD:-supersecretmongo}@mongodb:27017/cleancheck?authSource=admin
+      - JWT_SECRET=${JWT_SECRET:-yoursupersecretjwtkeysignatureshouldbechanged}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - DOMAIN_NAME=${DOMAIN_NAME:-localhost}
+      - APP_URL=${APP_URL:-http://localhost}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
+      - UPLOAD_PATH=/app/uploads
+      - BACKUP_PATH=/app/backups
+      - LOG_PATH=/app/logs
+    volumes:
+      - uploads_data:/app/uploads
+      - backups_data:/app/backups
+      - logs_data:/app/logs
+    networks:
+      - cleancheck_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  nginx:
+    image: nginx:alpine
+    container_name: cleancheck_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - certbot_certs:/etc/letsencrypt
+      - certbot_challenge:/var/www/certbot
+    depends_on:
+      - cleancheck
+    networks:
+      - cleancheck_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  certbot:
+    image: certbot/certbot
+    container_name: cleancheck_certbot
+    volumes:
+      - certbot_certs:/etc/letsencrypt
+      - certbot_challenge:/var/www/certbot
+    entrypoint: "/bin/sh -c 'trap exit TERM; while :; do certbot renew; sleep 12h & wait $${!}; done;'"
+
+networks:
+  cleancheck_network:
+    driver: bridge
+
+volumes:
+  mongodb_data:
+    driver: local
+  uploads_data:
+    driver: local
+  backups_data:
+    driver: local
+  logs_data:
+    driver: local
+  certbot_certs:
+    driver: local
+  certbot_challenge:
+    driver: local

@@ -1,0 +1,6 @@
+{
+  "name": "CleanCheck",
+  "description": "An AI-assisted full-stack facility compliance & inspection system. Features organization hierarchy CRUD, QR-badged room validation, offline-fallback camera scans, history registry, and Google Sheets sync.",
+  "requestFramePermissions": ["camera", "geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

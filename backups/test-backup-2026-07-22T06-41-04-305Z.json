@@ -1,0 +1,141 @@
+{
+  "users": [
+    {
+      "id": "usr-admin-1",
+      "username": "admin_test",
+      "email": "admin@cleancheck.com",
+      "fullName": "Super Admin Operator",
+      "role": "Super Admin",
+      "organizationId": "",
+      "passwordHash": "hash123",
+      "salt": "salt123",
+      "createdAt": "2026-07-22T06:41:04.304Z"
+    },
+    {
+      "id": "usr-mgr-1",
+      "username": "manager_test",
+      "email": "manager@cleancheck.com",
+      "fullName": "Manager Operator",
+      "role": "Organization Admin",
+      "organizationId": "org-verification-100",
+      "passwordHash": "hash123",
+      "salt": "salt123",
+      "createdAt": "2026-07-22T06:41:04.304Z"
+    },
+    {
+      "id": "usr-insp-1",
+      "username": "inspector_test",
+      "email": "inspector@cleancheck.com",
+      "fullName": "Inspector Operator",
+      "role": "Inspector",
+      "organizationId": "org-verification-100",
+      "passwordHash": "hash123",
+      "salt": "salt123",
+      "createdAt": "2026-07-22T06:41:04.304Z"
+    }
+  ],
+  "organizations": [
+    {
+      "id": "org-verification-100",
+      "name": "St. Jude Healthcare Corp",
+      "code": "SJ-HEALTH",
+      "createdAt": "2026-07-22T06:41:04.304Z"
+    }
+  ],
+  "buildings": [
+    {
+      "id": "bld-verification-100",
+      "organizationId": "org-verification-100",
+      "name": "East Wing Pavilion",
+      "address": "777 Hope Way",
+      "createdAt": "2026-07-22T06:41:04.304Z"
+    }
+  ],
+  "floors": [
+    {
+      "id": "flr-verification-100",
+      "buildingId": "bld-verification-100",
+      "name": "Level 4 Intensive Care",
+      "level": 4,
+      "createdAt": "2026-07-22T06:41:04.304Z"
+    }
+  ],
+  "rooms": [
+    {
+      "id": "rm-verification-100",
+      "floorId": "flr-verification-100",
+      "buildingId": "bld-verification-100",
+      "name": "ICU Unit 402",
+      "type": "Restroom",
+      "qrToken": "tok-777",
+      "createdAt": "2026-07-22T06:41:04.304Z"
+    }
+  ],
+  "qrcodes": [
+    {
+      "_id": "rm-verification-100",
+      "roomId": "rm-verification-100",
+      "token": "tok-777",
+      "generatedAt": "2026-07-22T06:41:04.304Z",
+      "scansCount": 5,
+      "status": "Active",
+      "isDeleted": false
+    }
+  ],
+  "assignments": [
+    {
+      "id": "asg-verification-100",
+      "inspectorId": "usr-insp-1",
+      "inspectorName": "Inspector Operator",
+      "roomIds": [
+        "rm-verification-100"
+      ],
+      "shift": "Day",
+      "date": "2026-07-22",
+      "createdAt": "2026-07-22T06:41:04.304Z"
+    }
+  ],
+  "inspections": [
+    {
+      "id": "insp-verification-100",
+      "roomId": "rm-verification-100",
+      "roomName": "ICU Unit 402",
+      "floorName": "Level 4 Intensive Care",
+      "buildingName": "East Wing Pavilion",
+      "organizationName": "St. Jude Healthcare Corp",
+      "inspectorId": "usr-insp-1",
+      "inspectorName": "Inspector Operator",
+      "cleaned": true,
+      "rating": 5,
+      "remarks": "Fully sterilized.",
+      "deviceTime": "2026-07-22T06:41:04.304Z",
+      "status": "Submitted",
+      "isDeleted": false,
+      "createdAt": "2026-07-22T06:41:04.304Z"
+    }
+  ],
+  "audit_logs": [
+    {
+      "id": "audit-1784702464304",
+      "userId": "usr-admin-1",
+      "username": "admin_test",
+      "action": "Create Facility",
+      "details": "East Wing Pavilion added to inventory.",
+      "createdAt": "2026-07-22T06:41:04.304Z"
+    }
+  ],
+  "logs": [],
+  "settings": [
+    {
+      "googleSheetsId": "sheet-777-id",
+      "googleClientEmail": "api-service@cc.iam.gserviceaccount.com",
+      "googlePrivateKey": "-----BEGIN PRIVATE KEY-----\nMIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQ...",
+      "smtpHost": "smtp.sendgrid.net",
+      "smtpPort": "587",
+      "smtpUser": "apikey",
+      "companyName": "CleanCheck Corporate Pavilion",
+      "companyLogoUrl": "https://logo.cleancheck.com/logo.png",
+      "autoSync": true
+    }
+  ]
+}
