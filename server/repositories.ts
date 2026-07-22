@@ -445,9 +445,10 @@ export const qrCodeRepository = {
   },
 
   async insert(doc: any): Promise<any> {
-    const item = { ...doc, isDeleted: false };
+    const qrId = doc.id || doc.roomId;
+    const item = { ...doc, id: qrId, isDeleted: false };
     if (mongoEnabled) {
-      const modelDoc = new QRCodeModel({ ...item, _id: item.roomId });
+      const modelDoc = new QRCodeModel({ ...item, _id: item.roomId, id: qrId });
       await modelDoc.save();
     }
     if (!db.qrCodes) db.qrCodes = [];

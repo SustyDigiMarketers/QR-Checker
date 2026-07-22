@@ -58,6 +58,7 @@ export interface Room {
 }
 
 export interface QrCodeDetails {
+  id?: string;
   roomId: string;
   token: string;
   generatedAt: string;

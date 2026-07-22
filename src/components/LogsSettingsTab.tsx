@@ -45,6 +45,10 @@ export default function LogsSettingsTab({
   // Dynamic panel selector: 'settings' | 'audit' | 'system'
   const [panelMode, setPanelMode] = useState<'settings' | 'audit' | 'system'>(initialPanelMode || 'settings');
 
+  // Safe array guards
+  const safeAuditLogs = Array.isArray(auditLogs) ? auditLogs : [];
+  const safeInspections = Array.isArray(inspections) ? inspections : [];
+
   // SMTP Settings form states
   const [companyName, setCompanyName] = useState(settings?.companyName || '');
   const [companyLogoUrl, setCompanyLogoUrl] = useState(settings?.companyLogoUrl || '');
@@ -55,6 +59,7 @@ export default function LogsSettingsTab({
   // System Health and Backup States
   const [systemHealth, setSystemHealth] = useState<any>(null);
   const [backups, setBackups] = useState<string[]>([]);
+  const safeBackups = Array.isArray(backups) ? backups : [];
   const [loadingHealth, setLoadingHealth] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
   const [restoring, setRestoring] = useState<string | null>(null);
@@ -297,14 +302,14 @@ export default function LogsSettingsTab({
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 text-xs text-gray-500">
-                {auditLogs.length === 0 ? (
+                {safeAuditLogs.length === 0 ? (
                   <tr>
                     <td colSpan={4} className="py-8 text-center text-gray-400 font-bold uppercase tracking-wider text-[10px]">
                       No audit events recorded in database.
                     </td>
                   </tr>
                 ) : (
-                  auditLogs.map((log, index) => (
+                  safeAuditLogs.map((log, index) => (
                     <tr key={log.id || `audit-log-${index}`} className="hover:bg-[#FAFAF8] transition-colors">
                       <td className="py-3.5 px-6 font-extrabold text-[#1F2937]">
                         <span className="inline-block bg-gray-100 border border-gray-200 text-gray-700 font-bold text-[9px] px-2 py-0.5 rounded-md">
@@ -441,13 +446,13 @@ export default function LogsSettingsTab({
 
             <div className="border-t border-gray-100 pt-4 flex-1">
               <h4 className="text-[10px] font-extrabold text-gray-400 uppercase tracking-wider mb-3">Available Snapshots</h4>
-              {backups.length === 0 ? (
+              {safeBackups.length === 0 ? (
                 <div className="border border-dashed border-gray-200 rounded-xl py-8 text-center text-gray-400 text-[10px] uppercase font-bold tracking-wider">
                   No backups found on server.
                 </div>
               ) : (
                 <div className="flex flex-col gap-2 max-h-56 overflow-y-auto pr-1">
-                  {backups.map((bk, i) => (
+                  {safeBackups.map((bk, i) => (
                     <div key={bk || i} className="bg-[#FAFAF8] border border-gray-200 rounded-xl p-3 flex items-center justify-between text-xs gap-2">
                       <div className="truncate flex-1">
                         <p className="font-bold text-[#1F2937] truncate font-mono text-[10px]" title={bk}>{bk}</p>

@@ -13,7 +13,9 @@ import {
   EyeOff,
   Bell,
   Search,
-  Check
+  Check,
+  Menu,
+  X
 } from 'lucide-react';
 
 // Import Types
@@ -53,6 +55,7 @@ export default function App() {
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
 
   // Notification and Global Search States
   const [notifications, setNotifications] = useState<{ id: string; title: string; message: string; timestamp: Date; type: 'alert' | 'info' | 'success'; read: boolean }[]>([
@@ -253,17 +256,25 @@ export default function App() {
         usrRes.json()
       ]);
 
-      setStats(statsData);
-      setOrganizations(orgsData);
-      setBuildings(bldData);
-      setFloors(flrData);
-      setRooms(roomsData);
-      setQrCodes(qrsData);
-      setInspections(insData);
+      const ensureArray = (data: any) => {
+        if (Array.isArray(data)) return data;
+        if (data && Array.isArray(data.data)) return data.data;
+        if (data && Array.isArray(data.items)) return data.items;
+        if (data && Array.isArray(data.assignments)) return data.assignments;
+        return [];
+      };
+
+      setStats(statsData && !statsData.error ? statsData : null);
+      setOrganizations(ensureArray(orgsData));
+      setBuildings(ensureArray(bldData));
+      setFloors(ensureArray(flrData));
+      setRooms(ensureArray(roomsData));
+      setQrCodes(ensureArray(qrsData));
+      setInspections(ensureArray(insData));
       setSettings(settData);
-      setAuditLogs(logsData);
-      setAssignments(asgData);
-      setUsers(usrData);
+      setAuditLogs(ensureArray(logsData));
+      setAssignments(ensureArray(asgData));
+      setUsers(ensureArray(usrData));
     } catch (err) {
       console.error('Operational database sync failed:', err);
     }
@@ -1280,55 +1291,63 @@ export default function App() {
   // Filter datasets based on Manager's organization if role is Organization Admin
   const orgId = currentUser.role === 'Organization Admin' ? currentUser.organizationId : null;
 
+  const safeAssignments = Array.isArray(assignments) ? assignments : [];
+  const safeUsers = Array.isArray(users) ? users : [];
+  const safeBuildings = Array.isArray(buildings) ? buildings : [];
+  const safeFloors = Array.isArray(floors) ? floors : [];
+  const safeRooms = Array.isArray(rooms) ? rooms : [];
+  const safeQrCodes = Array.isArray(qrCodes) ? qrCodes : [];
+  const safeInspections = Array.isArray(inspections) ? inspections : [];
+
   const filteredBuildings = orgId 
-    ? buildings.filter(b => b.organizationId === orgId) 
-    : buildings;
+    ? safeBuildings.filter(b => b.organizationId === orgId) 
+    : safeBuildings;
 
   const filteredBuildingsIds = filteredBuildings.map(b => b.id);
 
   const filteredFloors = orgId 
-    ? floors.filter(f => filteredBuildingsIds.includes(f.buildingId)) 
-    : floors;
+    ? safeFloors.filter(f => filteredBuildingsIds.includes(f.buildingId)) 
+    : safeFloors;
 
   const filteredFloorsIds = filteredFloors.map(f => f.id);
 
   const filteredRooms = orgId 
-    ? rooms.filter(r => filteredBuildingsIds.includes(r.buildingId) || filteredFloorsIds.includes(r.floorId)) 
-    : rooms;
+    ? safeRooms.filter(r => filteredBuildingsIds.includes(r.buildingId) || filteredFloorsIds.includes(r.floorId)) 
+    : safeRooms;
 
   const filteredRoomIds = filteredRooms.map(r => r.id);
 
   const filteredQrCodes = orgId 
-    ? qrCodes.filter(q => filteredRoomIds.includes(q.roomId)) 
-    : qrCodes;
+    ? safeQrCodes.filter(q => filteredRoomIds.includes(q.roomId)) 
+    : safeQrCodes;
 
   const filteredUsers = orgId 
-    ? users.filter(u => u.organizationId === orgId) 
-    : users;
+    ? safeUsers.filter(u => u.organizationId === orgId) 
+    : safeUsers;
 
   const filteredInspections = orgId 
-    ? inspections.filter(i => filteredRoomIds.includes(i.roomId))
-    : inspections;
+    ? safeInspections.filter(i => filteredRoomIds.includes(i.roomId))
+    : safeInspections;
 
   const filteredAssignments = orgId 
-    ? assignments.filter(a => filteredUsers.some(u => u.id === a.inspectorId))
-    : assignments;
+    ? safeAssignments.filter(a => filteredUsers.some(u => u.id === a.inspectorId))
+    : safeAssignments;
 
   // Global search filtering
   const searchRooms = globalSearchQuery
-    ? rooms.filter(r => r.name.toLowerCase().includes(globalSearchQuery.toLowerCase()))
+    ? safeRooms.filter(r => r.name.toLowerCase().includes(globalSearchQuery.toLowerCase()))
     : [];
   const searchBuildings = globalSearchQuery
-    ? buildings.filter(b => b.name.toLowerCase().includes(globalSearchQuery.toLowerCase()))
+    ? safeBuildings.filter(b => b.name.toLowerCase().includes(globalSearchQuery.toLowerCase()))
     : [];
   const searchInspectors = globalSearchQuery
-    ? users.filter(u => u.role === 'Inspector' && u.fullName.toLowerCase().includes(globalSearchQuery.toLowerCase()))
+    ? safeUsers.filter(u => u.role === 'Inspector' && u.fullName.toLowerCase().includes(globalSearchQuery.toLowerCase()))
     : [];
   const hasSearchResults = globalSearchQuery && (searchRooms.length > 0 || searchBuildings.length > 0 || searchInspectors.length > 0);
 
   // 3. ADMIN APPLICATION LAYOUT
   return (
-    <div className="min-h-screen bg-[#FAFAF8] text-[#1F2937] flex flex-col lg:flex-row font-sans selection:bg-[#E8F5E9]" id="app-root">
+    <div className="min-h-screen bg-[#FAFAF8] text-[#1F2937] flex flex-col lg:flex-row font-sans selection:bg-[#E8F5E9] lg:h-screen lg:overflow-hidden" id="app-root">
       
       {/* Toast Alert Drawer */}
       {toastMessage && (
@@ -1344,18 +1363,51 @@ export default function App() {
         setActiveTab={setActiveTab} 
         currentUser={currentUser} 
         onLogout={handleLogout} 
+        isMobileOpen={isMobileSidebarOpen}
+        onCloseMobile={() => setIsMobileSidebarOpen(false)}
       />
 
       {/* Main Container Content */}
       <main className="flex-1 flex flex-col min-h-0 bg-[#FAFAF8] overflow-y-auto">
         
         {/* Main upper toolbar */}
-        <header className="bg-white border-b border-[#E9E5DE] px-6 py-4 flex flex-col lg:flex-row justify-between items-center gap-4 shadow-xs relative" id="main-header">
-          {/* Active Tab Info */}
-          <div className="flex-shrink-0 w-full lg:w-auto text-center lg:text-left">
-            <h2 className="text-sm font-extrabold uppercase tracking-widest text-[#2E7D32]">
+        <header className="bg-white border-b border-[#E9E5DE] px-4 md:px-6 py-3.5 flex flex-col lg:flex-row justify-between items-center gap-3 shadow-xs relative" id="main-header">
+          
+          {/* Mobile Top Header Bar (< 1024px) */}
+          <div className="lg:hidden flex items-center justify-between w-full">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setIsMobileSidebarOpen(true)}
+                className="p-2 bg-gray-50 border border-gray-200 hover:bg-gray-100 text-gray-700 rounded-xl transition-colors shrink-0"
+                aria-label="Open navigation menu"
+                id="mobile-menu-toggle-btn"
+              >
+                <Menu className="w-5 h-5 text-gray-700" />
+              </button>
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-[#2E7D32] flex items-center justify-center text-white shrink-0 font-bold shadow-xs">
+                  <ClipboardCheck className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <h1 className="font-extrabold text-xs text-[#1F2937] uppercase tracking-tight leading-none">CleanCheck</h1>
+                  <p className="text-[9px] text-[#2E7D32] font-extrabold uppercase mt-0.5 tracking-wide">{activeTab}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="inline-block bg-[#E8F5E9] text-[#2E7D32] font-extrabold text-[9px] px-2 py-1 rounded-md uppercase tracking-wider">
+                {currentUser.role === 'Super Admin' ? 'Admin' : 'Org'}
+              </span>
+            </div>
+          </div>
+
+          {/* Desktop Active Tab Title (>= 1024px) */}
+          <div className="hidden lg:block flex-shrink-0 text-left">
+            <h2 className="text-xs font-extrabold uppercase tracking-widest text-[#2E7D32]">
               {activeTab === 'dashboard' && 'Operations Dashboard'}
               {activeTab === 'organizations' && 'Client Organizations Ledger'}
+              {activeTab === 'facilities' && 'Facility Master Matrix'}
               {activeTab === 'buildings' && 'Facility Master Matrix'}
               {activeTab === 'floors' && 'Building Floor Levels'}
               {activeTab === 'rooms' && 'Cleanliness Auditor Rooms'}
@@ -1363,10 +1415,11 @@ export default function App() {
               {activeTab === 'assignments' && 'Daily Shift & Room Assignments'}
               {activeTab === 'inspections' && 'Historical Inspections Database'}
               {activeTab === 'inspectors' && 'Active Field Inspectors'}
+              {activeTab === 'reports' && 'Facility Reports & Analytics'}
               {activeTab === 'audit-logs' && 'Security Audit Logs'}
               {activeTab === 'profile' && 'User Security Profile'}
             </h2>
-            <p className="text-xs text-gray-400 font-semibold mt-0.5">Logged Session in Client ID: CC-3814</p>
+            <p className="text-[10px] text-gray-400 font-semibold mt-0.5">Logged Session: CC-3814</p>
           </div>
 
           {/* Center: Global Search Bar */}

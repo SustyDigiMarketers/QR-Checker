@@ -41,9 +41,15 @@ export default function QrCodeTab({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedQrId, setSelectedQrId] = useState<string | null>(null);
 
+  // Safe array guards
+  const safeQrCodes = Array.isArray(qrCodes) ? qrCodes : [];
+  const safeRooms = Array.isArray(rooms) ? rooms : [];
+  const safeBuildings = Array.isArray(buildings) ? buildings : [];
+  const safeFloors = Array.isArray(floors) ? floors : [];
+
   // Filter QR codes
-  const filteredQrs = qrCodes.filter(q => {
-    const room = rooms.find(r => r.id === q.roomId);
+  const filteredQrs = safeQrCodes.filter(q => {
+    const room = safeRooms.find(r => r.id === q.roomId);
     if (!room) return false;
     return (
       room.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -51,10 +57,10 @@ export default function QrCodeTab({
     );
   });
 
-  const activeQr = qrCodes.find(q => q.roomId === selectedQrId);
-  const activeRoom = activeQr ? rooms.find(r => r.id === activeQr.roomId) : null;
-  const activeBuilding = activeRoom ? buildings.find(b => b.id === activeRoom.buildingId) : null;
-  const activeFloor = activeRoom ? floors.find(f => f.id === activeRoom.floorId) : null;
+  const activeQr = safeQrCodes.find(q => q.roomId === selectedQrId);
+  const activeRoom = activeQr ? safeRooms.find(r => r.id === activeQr.roomId) : null;
+  const activeBuilding = activeRoom ? safeBuildings.find(b => b.id === activeRoom.buildingId) : null;
+  const activeFloor = activeRoom ? safeFloors.find(f => f.id === activeRoom.floorId) : null;
 
   // Print function (opens standard browser print dialog)
   const handlePrintBadge = () => {

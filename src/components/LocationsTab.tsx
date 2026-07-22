@@ -143,8 +143,14 @@ export default function LocationsTab({
   const [rmName, setRmName] = useState('');
   const [rmType, setRmType] = useState('Restroom');
 
+  // Safe array guards
+  const safeOrganizations = Array.isArray(organizations) ? organizations : [];
+  const safeBuildings = Array.isArray(buildings) ? buildings : [];
+  const safeFloors = Array.isArray(floors) ? floors : [];
+  const safeRooms = Array.isArray(rooms) ? rooms : [];
+
   // Filter lists based on building selection during room setup
-  const availableFloorsForRoom = floors.filter(f => f.buildingId === rmBldId);
+  const availableFloorsForRoom = safeFloors.filter(f => f.buildingId === rmBldId);
 
   // Submit Building
   const handleAddBuilding = async (e: React.FormEvent) => {
@@ -276,7 +282,7 @@ export default function LocationsTab({
                     className="w-full text-xs bg-[#FAFAF8] border border-[#E9E5DE] p-3 rounded-xl focus:outline-none font-semibold text-[#1F2937]"
                   >
                     <option value="">Select Organization...</option>
-                    {organizations.filter(o => o.active).map(o => (
+                    {safeOrganizations.filter(o => o.active).map(o => (
                       <option key={o.id} value={o.id}>{o.name} ({o.code})</option>
                     ))}
                   </select>
@@ -489,10 +495,10 @@ export default function LocationsTab({
             ) : (
               <div className="flex flex-col gap-4">
                 {(() => {
-                  const orgIds = Array.from(new Set(buildings.map(b => b.organizationId)));
+                  const orgIds = Array.from(new Set(safeBuildings.map(b => b.organizationId)));
                   return orgIds.map(orgId => {
-                    const org = organizations.find(o => o.id === orgId);
-                    const orgBuildings = buildings.filter(b => b.organizationId === orgId);
+                    const org = safeOrganizations.find(o => o.id === orgId);
+                    const orgBuildings = safeBuildings.filter(b => b.organizationId === orgId);
                     
                     return (
                       <div key={orgId || 'unmapped'} className="border border-gray-100 rounded-xl overflow-hidden shadow-2xs bg-gray-50/20">

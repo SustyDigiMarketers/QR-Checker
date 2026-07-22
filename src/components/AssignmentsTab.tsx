@@ -29,8 +29,12 @@ export default function AssignmentsTab({
   const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  const safeAssignments = Array.isArray(assignments) ? assignments : [];
+  const safeUsers = Array.isArray(users) ? users : [];
+  const safeRooms = Array.isArray(rooms) ? rooms : [];
+
   // Filter inspectors
-  const inspectors = users.filter(u => u.role === 'Inspector');
+  const inspectors = safeUsers.filter(u => u.role === 'Inspector');
 
   const handleToggleRoom = (roomId: string) => {
     setSelectedRoomIds(prev => 
@@ -236,12 +240,12 @@ export default function AssignmentsTab({
               </div>
               <div>
                 <h3 className="font-extrabold text-sm text-[#1F2937] uppercase tracking-wider">Shift Assignment Grid</h3>
-                <p className="text-[10px] text-gray-400 font-semibold uppercase mt-0.5">Currently issued schedules ({assignments.length})</p>
+                <p className="text-[10px] text-gray-400 font-semibold uppercase mt-0.5">Currently issued schedules ({safeAssignments.length})</p>
               </div>
             </div>
           </div>
 
-          {assignments.length === 0 ? (
+          {safeAssignments.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center" id="empty-assignments-state">
               <FolderTree className="w-12 h-12 text-gray-300 mb-3 animate-pulse" />
               <p className="text-xs font-bold text-gray-500 uppercase tracking-wider">No Shifts Scheduled</p>
@@ -249,7 +253,7 @@ export default function AssignmentsTab({
             </div>
           ) : (
             <div className="flex flex-col gap-4" id="assignments-list">
-              {assignments.map(asg => (
+              {safeAssignments.map(asg => (
                 <div
                   key={asg.id}
                   className="bg-[#FAFAF8] border border-[#E9E5DE] rounded-2xl p-5 hover:border-gray-300 transition-all flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"

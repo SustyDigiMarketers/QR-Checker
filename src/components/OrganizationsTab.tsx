@@ -198,8 +198,16 @@ export default function OrganizationsTab({
     }
   };
 
+  // Safe array guards
+  const safeOrganizations = Array.isArray(organizations) ? organizations : [];
+  const safeBuildings = Array.isArray(buildings) ? buildings : [];
+  const safeFloors = Array.isArray(floors) ? floors : [];
+  const safeRooms = Array.isArray(rooms) ? rooms : [];
+  const safeQrCodes = Array.isArray(qrCodes) ? qrCodes : [];
+  const safeUsers = Array.isArray(users) ? users : [];
+
   // Filter organizations
-  const filteredOrgs = organizations.filter(o => 
+  const filteredOrgs = safeOrganizations.filter(o => 
     o.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
     o.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
     (o.address && o.address.toLowerCase().includes(searchTerm.toLowerCase()))
@@ -207,23 +215,23 @@ export default function OrganizationsTab({
 
   // DRILLDOWN VIEW RENDERER
   if (activeOrgId) {
-    const selectedOrg = organizations.find(o => o.id === activeOrgId);
+    const selectedOrg = safeOrganizations.find(o => o.id === activeOrgId);
     if (!selectedOrg) {
       setActiveOrgId(null);
       return null;
     }
 
     // Filter layouts and assets for this organization
-    const orgBuildings = buildings.filter(b => b.organizationId === activeOrgId);
+    const orgBuildings = safeBuildings.filter(b => b.organizationId === activeOrgId);
     const orgBuildingsIds = orgBuildings.map(b => b.id);
-    const orgFloors = floors.filter(f => orgBuildingsIds.includes(f.buildingId));
+    const orgFloors = safeFloors.filter(f => orgBuildingsIds.includes(f.buildingId));
     const orgFloorIds = orgFloors.map(f => f.id);
-    const orgRooms = rooms.filter(r => orgBuildingsIds.includes(r.buildingId) || orgFloorIds.includes(r.floorId));
+    const orgRooms = safeRooms.filter(r => orgBuildingsIds.includes(r.buildingId) || orgFloorIds.includes(r.floorId));
     const orgRoomIds = orgRooms.map(r => r.id);
-    const orgQrCodes = qrCodes.filter(q => orgRoomIds.includes(q.roomId));
+    const orgQrCodes = safeQrCodes.filter(q => orgRoomIds.includes(q.roomId));
 
     // Filter staff for this organization
-    const orgUsers = users.filter(u => u.organizationId === activeOrgId);
+    const orgUsers = safeUsers.filter(u => u.organizationId === activeOrgId);
     const managersList = orgUsers.filter(u => u.role === 'Organization Admin' && 
       (u.fullName.toLowerCase().includes(staffSearchTerm.toLowerCase()) || u.username.toLowerCase().includes(staffSearchTerm.toLowerCase()))
     );

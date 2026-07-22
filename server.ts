@@ -362,12 +362,12 @@ function bootstrapInitialState(): DatabaseSchema {
       }
     ],
     qrCodes: [
-      { roomId: 'rm-1', token: 'qr-exec-restroom-a', generatedAt: new Date(Date.now() - 27 * 24 * 60 * 60 * 1000).toISOString(), scansCount: 15, status: 'Active' },
-      { roomId: 'rm-2', token: 'qr-kitchenette-coffee-bar', generatedAt: new Date(Date.now() - 27 * 24 * 60 * 60 * 1000).toISOString(), scansCount: 12, status: 'Active' },
-      { roomId: 'rm-3', token: 'qr-conference-center-east', generatedAt: new Date(Date.now() - 27 * 24 * 60 * 60 * 1000).toISOString(), scansCount: 8, status: 'Active' },
-      { roomId: 'rm-4', token: 'qr-lobby-public-washroom', generatedAt: new Date(Date.now() - 26 * 24 * 60 * 60 * 1000).toISOString(), scansCount: 22, status: 'Active' },
-      { roomId: 'rm-5', token: 'qr-pediatric-waiting-zone', generatedAt: new Date(Date.now() - 17 * 24 * 60 * 60 * 1000).toISOString(), scansCount: 5, status: 'Active' },
-      { roomId: 'rm-6', token: 'qr-surgical-icu-restroom', generatedAt: new Date(Date.now() - 17 * 24 * 60 * 60 * 1000).toISOString(), scansCount: 30, status: 'Active' }
+      { id: 'rm-1', roomId: 'rm-1', token: 'qr-exec-restroom-a', generatedAt: new Date(Date.now() - 27 * 24 * 60 * 60 * 1000).toISOString(), scansCount: 15, status: 'Active' },
+      { id: 'rm-2', roomId: 'rm-2', token: 'qr-kitchenette-coffee-bar', generatedAt: new Date(Date.now() - 27 * 24 * 60 * 60 * 1000).toISOString(), scansCount: 12, status: 'Active' },
+      { id: 'rm-3', roomId: 'rm-3', token: 'qr-conference-center-east', generatedAt: new Date(Date.now() - 27 * 24 * 60 * 60 * 1000).toISOString(), scansCount: 8, status: 'Active' },
+      { id: 'rm-4', roomId: 'rm-4', token: 'qr-lobby-public-washroom', generatedAt: new Date(Date.now() - 26 * 24 * 60 * 60 * 1000).toISOString(), scansCount: 22, status: 'Active' },
+      { id: 'rm-5', roomId: 'rm-5', token: 'qr-pediatric-waiting-zone', generatedAt: new Date(Date.now() - 17 * 24 * 60 * 60 * 1000).toISOString(), scansCount: 5, status: 'Active' },
+      { id: 'rm-6', roomId: 'rm-6', token: 'qr-surgical-icu-restroom', generatedAt: new Date(Date.now() - 17 * 24 * 60 * 60 * 1000).toISOString(), scansCount: 30, status: 'Active' }
     ],
     inspections: [
       // Slew of detailed historical inspections to populate charts instantly!
@@ -994,8 +994,9 @@ async function startServer() {
     try {
       const mongoCol = getMongoCollectionName(collectionName);
       const doc = { ...data };
+      if (!doc.id && doc.roomId) doc.id = doc.roomId;
       doc._id = docId;
-      if (doc.id) doc.id = docId;
+      if (!doc.id) doc.id = docId;
       
       await mongoDb.collection(mongoCol).updateOne(
         { _id: docId },
@@ -1035,6 +1036,8 @@ async function startServer() {
     let delay = 1000;
     let connected = false;
 
+    const targetDbName = process.env.MONGODB_DB_NAME || 'cleancheck';
+
     while (attempt <= maxAttempts) {
       try {
         console.log(`[MongoDB] Connecting to database (Attempt ${attempt}/${maxAttempts})...`);
@@ -1043,9 +1046,21 @@ async function startServer() {
           socketTimeoutMS: 30000,
         });
         await mongoClient.connect();
-        mongoDb = mongoClient.db();
-        await mongoose.connect(uri);
-        console.log('[Mongoose] Connected securely to MongoDB via Mongoose ODM.');
+
+        let dbName = targetDbName;
+        try {
+          const urlObj = new URL(uri);
+          const pathName = urlObj.pathname ? urlObj.pathname.replace(/^\//, '') : '';
+          if (pathName && pathName.trim().length > 0) {
+            dbName = pathName.trim();
+          }
+        } catch (_) {
+          // Default to targetDbName if URI parsing is relative or standard connection format
+        }
+
+        mongoDb = mongoClient.db(dbName);
+        await mongoose.connect(uri, { dbName });
+        console.log(`[Mongoose] Connected securely to MongoDB database '${dbName}' via Mongoose ODM.`);
         mongoEnabled = true;
         console.log('[MongoDB] Connected securely and established connection pool to MongoDB database.');
         connected = true;
@@ -1069,6 +1084,16 @@ async function startServer() {
 
     if (connected && mongoDb) {
       try {
+        // Clean up any existing invalid documents with null or missing id in qrcodes
+        try {
+          await mongoDb.collection('qrcodes').updateMany(
+            { $or: [{ id: null }, { id: { $exists: false } }] },
+            [{ $set: { id: { $ifNull: ["$roomId", "$_id"] } } }]
+          );
+        } catch (cleanErr: any) {
+          console.warn('[MongoDB Initialization] Note on qrcodes id field repair:', cleanErr.message || cleanErr);
+        }
+
         // Ensure proper validation, indexing, and tenant isolation
         await mongoDb.collection('users').createIndex({ username: 1 }, { unique: true });
         await mongoDb.collection('users').createIndex({ email: 1 });
@@ -1132,6 +1157,7 @@ async function startServer() {
           if (items && items.length > 0) {
             const documents = items.map(item => {
               const doc = { ...item };
+              if (!doc.id && doc.roomId) doc.id = doc.roomId;
               if (doc.id) {
                 doc._id = doc.id;
               } else if (doc.roomId) {
@@ -1337,8 +1363,11 @@ async function startServer() {
     if (mongoEnabled && mongoDb) {
       const colName = getMongoCollectionName(collectionName);
       const mongoDoc = { ...doc };
+      if (!mongoDoc.id && mongoDoc.roomId) mongoDoc.id = mongoDoc.roomId;
       if (mongoDoc.id) {
         mongoDoc._id = mongoDoc.id;
+      } else if (mongoDoc.roomId) {
+        mongoDoc._id = mongoDoc.roomId;
       }
       await mongoDb.collection(colName).insertOne(mongoDoc);
     }
@@ -4170,6 +4199,7 @@ async function startServer() {
     };
 
     const newQr: QrCodeDetails = {
+      id: roomId,
       roomId,
       token,
       generatedAt: new Date().toISOString(),

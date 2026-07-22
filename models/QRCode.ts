@@ -2,6 +2,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IQRCode {
   _id: string;
+  id: string;
   roomId: string;
   token: string;
   generatedAt: Date;
@@ -14,6 +15,7 @@ export interface IQRCode {
 
 const QRCodeSchema = new Schema<IQRCode>({
   _id: { type: String, required: true },
+  id: { type: String, required: true, unique: true, index: true },
   roomId: { type: String, required: true, unique: true, index: true },
   token: { type: String, required: true, index: true },
   generatedAt: { type: Date, default: Date.now },

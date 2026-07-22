@@ -178,6 +178,7 @@ export const organizationService = {
 
       // 6. Create Initial QR Code
       const qr = {
+        id: roomId,
         roomId,
         token: qrToken,
         generatedAt: new Date().toISOString(),
@@ -186,7 +187,7 @@ export const organizationService = {
       };
 
       if (mongoEnabled) {
-        const doc = new QRCodeModel({ ...qr, _id: roomId });
+        const doc = new QRCodeModel({ ...qr, _id: roomId, id: roomId });
         await doc.save({ session });
       }
       if (!db.qrCodes) db.qrCodes = [];

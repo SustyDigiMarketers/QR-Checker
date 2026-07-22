@@ -72,18 +72,25 @@ export default function ReportsTab({
     }
   }, [currentUser]);
 
+  // Safe array guards
+  const safeOrganizations = Array.isArray(organizations) ? organizations : [];
+  const safeBuildings = Array.isArray(buildings) ? buildings : [];
+  const safeFloors = Array.isArray(floors) ? floors : [];
+  const safeRooms = Array.isArray(rooms) ? rooms : [];
+  const safeInspectors = Array.isArray(inspectors) ? inspectors : [];
+
   // Dynamic lists filtered by hierarchy
   const availableBuildings = selectedOrg 
-    ? buildings.filter(b => b.organizationId === selectedOrg)
-    : buildings;
+    ? safeBuildings.filter(b => b.organizationId === selectedOrg)
+    : safeBuildings;
 
   const availableFloors = selectedBuilding 
-    ? floors.filter(f => f.buildingId === selectedBuilding)
-    : floors;
+    ? safeFloors.filter(f => f.buildingId === selectedBuilding)
+    : safeFloors;
 
   const availableRooms = selectedFloor 
-    ? rooms.filter(r => r.floorId === selectedFloor)
-    : rooms;
+    ? safeRooms.filter(r => r.floorId === selectedFloor)
+    : safeRooms;
 
   const fetchReport = async () => {
     setLoading(true);

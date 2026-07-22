@@ -14,7 +14,8 @@ import {
   Building,
   TableProperties,
   Calendar,
-  Users
+  Users,
+  X
 } from 'lucide-react';
 import { User as UserType } from '../types';
 
@@ -23,9 +24,11 @@ interface SidebarProps {
   setActiveTab: (tab: string) => void;
   currentUser: UserType | null;
   onLogout: () => void;
+  isMobileOpen?: boolean;
+  onCloseMobile?: () => void;
 }
 
-export default function Sidebar({ activeTab, setActiveTab, currentUser, onLogout }: SidebarProps) {
+export default function Sidebar({ activeTab, setActiveTab, currentUser, onLogout, isMobileOpen = false, onCloseMobile }: SidebarProps) {
   let menuItems: { id: string; label: string; icon: any }[] = [];
 
   if (currentUser?.role === 'Super Admin') {
@@ -49,19 +52,44 @@ export default function Sidebar({ activeTab, setActiveTab, currentUser, onLogout
     ];
   }
 
-  return (
-    <aside className="w-full lg:w-64 bg-white border-r border-[#E9E5DE] flex flex-col justify-between shadow-xs" id="sidebar-panel">
-      {/* Upper Content */}
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isMobileOpen && onCloseMobile) {
+        onCloseMobile();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isMobileOpen, onCloseMobile]);
+
+  const handleNavClick = (id: string) => {
+    setActiveTab(id);
+    if (onCloseMobile) onCloseMobile();
+  };
+
+  const renderNavContent = () => (
+    <div className="flex flex-col justify-between h-full">
       <div className="flex flex-col gap-6 py-6 px-4">
         {/* Brand/System Logo */}
-        <div className="flex items-center gap-3 px-2">
-          <div className="w-10 h-10 rounded-xl bg-[#2E7D32] flex items-center justify-center shadow-md shadow-[#2E7D32]/10 flex-shrink-0">
-            <ClipboardCheck className="w-5 h-5 text-white" />
+        <div className="flex items-center justify-between px-2">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#2E7D32] flex items-center justify-center shadow-md shadow-[#2E7D32]/10 flex-shrink-0">
+              <ClipboardCheck className="w-5 h-5 text-white" />
+            </div>
+            <div className="overflow-hidden">
+              <h1 className="font-extrabold text-sm text-[#1F2937] tracking-tight leading-none uppercase">CleanCheck</h1>
+              <p className="text-[10px] text-gray-500 font-medium tracking-wide mt-1 uppercase">Facility Operations</p>
+            </div>
           </div>
-          <div className="overflow-hidden">
-            <h1 className="font-extrabold text-sm text-[#1F2937] tracking-tight leading-none uppercase">CleanCheck</h1>
-            <p className="text-[10px] text-gray-500 font-medium tracking-wide mt-1 uppercase">Facility Inspections</p>
-          </div>
+          {onCloseMobile && (
+            <button 
+              onClick={onCloseMobile}
+              className="lg:hidden p-2 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+              aria-label="Close menu"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
         {/* User Quick Info */}
@@ -89,7 +117,7 @@ export default function Sidebar({ activeTab, setActiveTab, currentUser, onLogout
             return (
               <button
                 key={item.id}
-                onClick={() => setActiveTab(item.id)}
+                onClick={() => handleNavClick(item.id)}
                 className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-bold tracking-wide transition-all ${
                   isActive 
                     ? 'bg-[#2E7D32] text-white shadow-sm' 
@@ -108,7 +136,10 @@ export default function Sidebar({ activeTab, setActiveTab, currentUser, onLogout
       {/* Footer Content */}
       <div className="p-4 border-t border-[#E9E5DE] bg-[#FAFAF8]">
         <button
-          onClick={onLogout}
+          onClick={() => {
+            onLogout();
+            if (onCloseMobile) onCloseMobile();
+          }}
           className="w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-bold text-red-600 hover:bg-red-50 hover:text-red-700 transition-all group"
           id="logout-btn"
         >
@@ -118,6 +149,34 @@ export default function Sidebar({ activeTab, setActiveTab, currentUser, onLogout
           </span>
         </button>
       </div>
-    </aside>
+    </div>
+  );
+
+  return (
+    <>
+      {/* DESKTOP FIXED SIDEBAR (>= 1024px) */}
+      <aside 
+        className="hidden lg:flex w-64 h-screen sticky top-0 bg-white border-r border-[#E9E5DE] flex-col justify-between shadow-xs shrink-0 z-30" 
+        id="sidebar-panel-desktop"
+      >
+        {renderNavContent()}
+      </aside>
+
+      {/* MOBILE SLIDE-IN DRAWER (< 1024px) */}
+      {isMobileOpen && (
+        <div className="lg:hidden fixed inset-0 z-50 flex" id="mobile-sidebar-drawer">
+          {/* Backdrop Overlay */}
+          <div 
+            className="fixed inset-0 bg-gray-900/60 backdrop-blur-xs transition-opacity"
+            onClick={onCloseMobile}
+          />
+
+          {/* Slide-in Sidebar Panel */}
+          <div className="relative w-72 max-w-[85vw] h-full bg-white border-r border-[#E9E5DE] shadow-2xl z-50 flex flex-col animate-slide-in-left">
+            {renderNavContent()}
+          </div>
+        </div>
+      )}
+    </>
   );
 }

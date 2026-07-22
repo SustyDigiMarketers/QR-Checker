@@ -12,7 +12,8 @@
     "lint": "tsc --noEmit",
     "test:crud": "tsx server/tests/crud-test.ts",
     "test:backup": "tsx server/tests/backup-restore-test.ts",
-    "test": "tsx server/tests/crud-test.ts && tsx server/tests/backup-restore-test.ts"
+    "test:org": "tsx server/tests/organization-creation-test.ts",
+    "test": "tsx server/tests/crud-test.ts && tsx server/tests/backup-restore-test.ts && tsx server/tests/organization-creation-test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1092.0",

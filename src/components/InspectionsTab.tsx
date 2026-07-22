@@ -51,8 +51,11 @@ export default function InspectionsTab({
   // Supervisor verification comment buffer state
   const [reviewRemarks, setReviewRemarks] = useState<{ [inspectionId: string]: string }>({});
 
+  // Safe array guard
+  const safeInspections = Array.isArray(inspections) ? inspections : [];
+
   // Filter application
-  const filteredInspections = inspections.filter(ins => {
+  const filteredInspections = safeInspections.filter(ins => {
     // 0. Status match
     const insStatus = ins.status || 'Submitted';
     const matchesStatus = filterStatus === 'all' || insStatus === filterStatus;

@@ -35,6 +35,10 @@ export default function InspectorsTab({
   currentUserRole
 }: InspectorsTabProps) {
   
+  // Defensive array guards
+  const safeInspectors = Array.isArray(inspectors) ? inspectors : [];
+  const safeInspections = Array.isArray(inspections) ? inspections : [];
+
   // Registration form states
   const [isAdding, setIsAdding] = useState(false);
   const [fullName, setFullName] = useState('');
@@ -261,16 +265,16 @@ export default function InspectorsTab({
 
       {/* Grid of inspector cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {inspectors.length === 0 ? (
+        {safeInspectors.length === 0 ? (
           <div className="col-span-full bg-white border border-dashed border-[#E9E5DE] rounded-2xl p-12 text-center text-gray-400">
             <Users className="w-10 h-10 mx-auto text-gray-300 stroke-[1.5] mb-2" />
             <p className="font-extrabold text-xs uppercase tracking-wide">No Inspectors Registered</p>
             <p className="text-[10px] mt-1">Setup and assign inspectors to manage facility compliance scan routines.</p>
           </div>
         ) : (
-          inspectors.map(inspector => {
+          safeInspectors.map(inspector => {
             // Calculate performance metrics
-            const inspectorInspections = inspections.filter(i => i.inspectorId === inspector.id);
+            const inspectorInspections = safeInspections.filter(i => i.inspectorId === inspector.id);
             const totalAudits = inspectorInspections.length;
             
             // Average Rating

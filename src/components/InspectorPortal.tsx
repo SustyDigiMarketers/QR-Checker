@@ -51,13 +51,15 @@ export default function InspectorPortal({
   
   // Calculate assigned rooms for the current user today
   const todayStr = new Date().toISOString().split('T')[0];
-  const myAssignments = (assignments || []).filter(a => a.inspectorId === currentUser.id && a.date === todayStr);
+  const safeAssignments = Array.isArray(assignments) ? assignments : [];
+  const safeInspections = Array.isArray(inspections) ? inspections : [];
+  const myAssignments = safeAssignments.filter(a => a.inspectorId === currentUser.id && a.date === todayStr);
   const myAssignedRoomIds = Array.from(new Set(myAssignments.flatMap(asg => asg.roomIds)));
 
   const todayStartForCheck = new Date();
   todayStartForCheck.setHours(0, 0, 0, 0);
   const myCompletedRoomIds = new Set(
-    (inspections || [])
+    safeInspections
       .filter(ins => {
         const date = new Date(ins.createdAt);
         return date >= todayStartForCheck && ins.inspectorId === currentUser.id;
