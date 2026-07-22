@@ -32,18 +32,13 @@ jobs:
     - name: Run TypeScript Compiler Diagnostics
       run: npx tsc --noEmit
 
-    - name: Run Backend Core CRUD Integration Tests
-      run: npm run test:crud
+    - name: Run Complete Test Suite
+      run: npm test
       env:
-        MONGODB_URI: "mongodb://localhost:27017/test-db" # Uses in-memory fallback adapter in unit-test environment
-
-    - name: Run Backup & Restore Fault-Isolation Test Suite
-      run: npm run test:backup
-      env:
-        MONGODB_URI: "mongodb://localhost:27017/test-db" # Uses in-memory fallback adapter in unit-test environment
+        MONGODB_URI: "mongodb://localhost:27017/test-db"
 
   build_and_package:
-    name: Build & Dockerize Production Artifacts
+    name: Build & Verify Production Artifacts
     needs: validate_and_test
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
@@ -74,19 +69,7 @@ jobs:
           echo "[FATAL] Compiled server script dist/server.cjs is missing."
           exit 1
         fi
-
-    - name: Set up Docker Buildx Command Tooling
-      uses: docker/setup-buildx-action@v2
-
-    - name: Compile and Verify Production Docker Container Build
-      uses: docker/build-push-action@v4
-      with:
-        context: .
-        file: ./Dockerfile
-        push: false
-        tags: cleancheck:v1.0.0,cleancheck:latest
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
+        echo "[SUCCESS] Verified production artifacts in dist/ and dist/server.cjs."
 
   publish_release:
     name: Publish Production GitHub Release
@@ -104,18 +87,18 @@ jobs:
         echo "## CleanCheck Release ${{ github.ref_name }} (v1.0.0)" > release_notes.md
         echo "" >> release_notes.md
         echo "### Features & Highlights" >> release_notes.md
-        echo "- **Production Hardening**: Replaced mock data endpoints with fully transaction-safe MongoDB integration." >> release_notes.md
-        echo "- **Security Remediation**: Enforced RBAC filters, Helmet security headers, Heuristic anti-virus executable uploads block, and cryptographically secure QR generation." >> release_notes.md
-        echo "- **Operational Resiliency**: Implemented backup automated daily cron schedules, disaster recovery validation checkpoints, and container health verification endpoints." >> release_notes.md
-        echo "- **Nginx Reverse Proxy**: Bundled server orchestration with Nginx and Certbot Let's Encrypt automated TLS validation certificates." >> release_notes.md
+        echo "- **Production Architecture**: Native Render Web Service deployment with MongoDB Atlas system of record and private Cloudflare R2 object storage." >> release_notes.md
+        echo "- **Security Remediation**: Enforced RBAC filters, Helmet security headers, Heuristic anti-virus executable uploads block, and cryptographically secure QR verification." >> release_notes.md
+        echo "- **Operational Resiliency**: Automated daily R2 backup snapshots, transaction-safe disaster recovery engine, and health verification endpoints." >> release_notes.md
+        echo "- **Custom Domain & Cloudflare SSL**: Full (Strict) TLS edge protection with automated HTTPS redirection." >> release_notes.md
         echo "" >> release_notes.md
         echo "### Verification Diagnostics" >> release_notes.md
-        echo "- All CRUD Integration Test suites: **100% SUCCESS**" >> release_notes.md
+        echo "- Integration Test suites: **100% SUCCESS**" >> release_notes.md
         echo "- Backup/Restore Recovery validation tests: **100% SUCCESS**" >> release_notes.md
-        echo "- Production Docker health metrics checks: **PASSED**" >> release_notes.md
+        echo "- Production build bundle verification: **PASSED**" >> release_notes.md
 
     - name: Create Production GitHub Release Artifact
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         body_path: release_notes.md
         draft: false
@@ -139,3 +122,4 @@ jobs:
           else
             echo "[CI/CD] RENDER_DEPLOY_HOOK_URL secret not set. Skipping Render webhook trigger."
           fi
+
