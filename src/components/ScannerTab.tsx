@@ -29,13 +29,15 @@ interface ScannerTabProps {
     deviceTime: string;
     photoUrl?: string;
   }) => Promise<void>;
-  isProcessing: boolean;
+  onManualScanToken?: (token: string) => void;
+  isProcessing?: boolean;
 }
 
 export default function ScannerTab({
   currentUser,
   rooms,
   onAddInspection,
+  onManualScanToken,
   isProcessing
 }: ScannerTabProps) {
 
@@ -277,6 +279,10 @@ export default function ScannerTab({
 
   // Unified function to validate token and transition to Inspection Form
   const handleProcessToken = async (rawInput: string) => {
+    if (onManualScanToken) {
+      onManualScanToken(rawInput);
+      return;
+    }
     try {
       const cleanToken = extractQrToken(rawInput);
       if (!cleanToken) {
@@ -299,12 +305,13 @@ export default function ScannerTab({
       }
 
       const data = await response.json();
+      const resolvedRoom = data.room || { id: data.roomId, name: data.roomName };
       setScannedRoom({
-        id: data.room.id,
-        name: data.room.name,
-        buildingName: data.buildingName,
-        floorName: data.floorName,
-        organizationName: data.organizationName
+        id: resolvedRoom.id || data.roomId || 'room-unknown',
+        name: resolvedRoom.name || data.roomName || 'Scanned Facility Room',
+        buildingName: data.buildingName || 'Main Facility',
+        floorName: data.floorName || 'Floor Level',
+        organizationName: data.organizationName || 'Client Organization'
       });
       setWorkflowState('form');
     } catch (err: any) {

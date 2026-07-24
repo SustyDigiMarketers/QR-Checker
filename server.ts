@@ -2937,6 +2937,63 @@ async function startServer() {
     next();
   }
 
+  // Middleware: Optional user authentication (populates req.user if session provided, but allows public access if omitted)
+  async function optionalAuth(req: any, res: any, next: () => void) {
+    let userId: string | null = null;
+    let sessionToken: string | null = null;
+    
+    // Check Authorization header
+    const authHeader = req.headers['authorization'];
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      sessionToken = authHeader.substring(7);
+      let session = activeSessions[sessionToken];
+      
+      if (!session && mongoEnabled && mongoDb) {
+        try {
+          const dbSession = await mongoDb.collection('sessions').findOne({ id: sessionToken });
+          if (dbSession && new Date(dbSession.expiresAt) > new Date()) {
+            session = dbSession as any;
+            activeSessions[sessionToken] = session!;
+          }
+        } catch (e) {
+          console.error('[optionalAuth Mongo Session Lookup Error]', e);
+        }
+      }
+
+      if (session && new Date(session.expiresAt) > new Date()) {
+        userId = session.userId;
+        req.sessionToken = sessionToken;
+      }
+    }
+    
+    // Fallback to query param or body param for backward compatibility
+    if (!userId) {
+      userId = req.query.userId || req.body.operatorUserId || req.query.operatorUserId || req.body.userId;
+    }
+    
+    if (userId) {
+      let user = db.users.find(u => u.id === userId);
+
+      if (!user && mongoEnabled && mongoDb) {
+        try {
+          const dbUser = await mongoDb.collection('users').findOne({ $or: [{ id: userId }, { _id: userId }] });
+          if (dbUser) {
+            user = { ...dbUser, id: dbUser.id || dbUser._id } as any;
+            if (!db.users.some(u => u.id === user!.id)) db.users.push(user!);
+          }
+        } catch (e) {
+          console.error('[optionalAuth Mongo User Lookup Error]', e);
+        }
+      }
+
+      if (user) {
+        req.user = user;
+      }
+    }
+    
+    next();
+  }
+
   // Helper: Verify if operator has Administrative role permissions
   function verifyAdminAccess(req: any, res: any, next: () => void) {
     if (!req.user) {
@@ -4499,7 +4556,7 @@ async function startServer() {
 
 
   // --- SCAN QR: VALIDATE TOKEN ---
-  app.get('/api/scan/:token', requireAuth, async (req: any, res) => {
+  app.get('/api/scan/:token', optionalAuth, async (req: any, res) => {
     const { token } = req.params;
     const user = req.user;
 
@@ -4530,7 +4587,10 @@ async function startServer() {
     }
 
     if (!room) {
-      return res.status(404).json({ error: 'Invalid or broken QR Code token. Please contact facility admin.' });
+      return res.status(404).json({ 
+        title: "CleanCheck - Facility Compliance System",
+        error: 'Invalid or broken QR Code token. Please contact facility admin.' 
+      });
     }
 
     let qrCode = db.qrCodes.find(q => q.roomId === room!.id);
@@ -4547,7 +4607,10 @@ async function startServer() {
     }
 
     if (qrCode && qrCode.status === 'Disabled') {
-      return res.status(403).json({ error: 'This QR code token has been disabled by management.' });
+      return res.status(403).json({ 
+        title: "CleanCheck - Facility Compliance System",
+        error: 'This QR code token has been disabled by management.' 
+      });
     }
 
     let floor = db.floors.find(f => f.id === room!.floorId);
@@ -4590,13 +4653,19 @@ async function startServer() {
     }
 
     if (org && !org.active) {
-      return res.status(403).json({ error: `Organization "${org.name}" is currently set to Inactive. Inspections are locked.` });
+      return res.status(403).json({ 
+        title: "CleanCheck - Facility Compliance System",
+        error: `Organization "${org.name}" is currently set to Inactive. Inspections are locked.` 
+      });
     }
 
     if (user) {
       // Check organization alignment for security
       if (user.role !== 'Super Admin' && building && building.organizationId !== user.organizationId) {
-        return res.status(403).json({ error: '❌ Access denied: This room belongs to a different organization.' });
+        return res.status(403).json({ 
+          title: "CleanCheck - Facility Compliance System",
+          error: '❌ Access denied: This room belongs to a different organization.' 
+        });
       }
 
       if (user.role === 'Inspector') {
@@ -4606,7 +4675,10 @@ async function startServer() {
         if (inspectorAssignments.length > 0) {
           const isAssigned = inspectorAssignments.some(a => a.roomIds.includes(room!.id));
           if (!isAssigned) {
-            return res.status(403).json({ error: '❌ This room is not assigned to you for today\'s shift. Please contact your supervisor.' });
+            return res.status(403).json({ 
+              title: "CleanCheck - Facility Compliance System",
+              error: '❌ This room is not assigned to you for today\'s shift. Please contact your supervisor.' 
+            });
           }
         }
       }
@@ -4618,11 +4690,43 @@ async function startServer() {
       await dbUpdate('qrCodes', room.id, qrCode);
     }
 
+    let lastInspection = db.inspections.filter(i => i.roomId === room!.id).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+    if (!lastInspection && mongoEnabled && mongoDb) {
+      try {
+        const dbIns = await mongoDb.collection('inspections').find({ roomId: room!.id }).sort({ createdAt: -1 }).limit(1).toArray();
+        if (dbIns && dbIns.length > 0) {
+          lastInspection = { ...dbIns[0], id: dbIns[0].id || dbIns[0]._id } as any;
+        }
+      } catch (e) {
+        console.error('[Scan Mongo Last Inspection Lookup Error]', e);
+      }
+    }
+
     res.json({
+      title: "CleanCheck - Facility Compliance System",
+      success: true,
       room,
-      floorName: floor ? floor.name : 'Unknown Floor',
-      buildingName: building ? building.name : 'Unknown Building',
-      organizationName: org ? org.name : 'Unknown Organization'
+      roomId: room.id,
+      roomName: room.name,
+      roomType: room.type,
+      buildingId: building ? building.id : room.buildingId,
+      buildingName: building ? building.name : 'Main Facility',
+      floorId: floor ? floor.id : room.floorId,
+      floorName: floor ? floor.name : 'Floor Level',
+      organizationId: org ? org.id : (building ? building.organizationId : ''),
+      organizationName: org ? org.name : 'CleanCheck Client Organization',
+      qrToken: qrCode ? qrCode.token : room.qrToken || token,
+      badgeStatus: qrCode ? qrCode.status : 'Active',
+      scansCount: qrCode ? qrCode.scansCount : 1,
+      lastScannedAt: qrCode ? qrCode.lastScannedAt : new Date().toISOString(),
+      lastInspection: lastInspection ? {
+        id: lastInspection.id,
+        cleaned: lastInspection.cleaned,
+        rating: lastInspection.rating,
+        remarks: lastInspection.remarks,
+        deviceTime: lastInspection.deviceTime,
+        createdAt: lastInspection.createdAt
+      } : null
     });
   });
 

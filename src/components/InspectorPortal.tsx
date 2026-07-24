@@ -23,6 +23,7 @@ interface InspectorPortalProps {
   rooms: Room[];
   assignments: Assignment[];
   inspections: Inspection[];
+  initialToken?: string;
   onAddInspection: (inspection: {
     roomId: string;
     inspectorId: string;
@@ -44,6 +45,7 @@ export default function InspectorPortal({
   rooms,
   assignments,
   inspections,
+  initialToken,
   onAddInspection,
   onLogout,
   isProcessing
@@ -255,6 +257,13 @@ export default function InspectorPortal({
     };
   }, [workflowState]);
 
+  // Trigger initial token processing if passed from URL
+  useEffect(() => {
+    if (initialToken) {
+      handleValidateAndProcessToken(initialToken);
+    }
+  }, [initialToken]);
+
   // Validate QR Token on Server
   const handleValidateAndProcessToken = async (rawInput: string) => {
     try {
@@ -278,12 +287,13 @@ export default function InspectorPortal({
       }
 
       const data = await response.json();
+      const resolvedRoom = data.room || { id: data.roomId, name: data.roomName };
       setScannedRoom({
-        id: data.room.id,
-        name: data.room.name,
-        buildingName: data.buildingName,
-        floorName: data.floorName,
-        organizationName: data.organizationName,
+        id: resolvedRoom.id || data.roomId || 'room-unknown',
+        name: resolvedRoom.name || data.roomName || 'Scanned Facility Room',
+        buildingName: data.buildingName || 'Main Building',
+        floorName: data.floorName || 'Floor Level',
+        organizationName: data.organizationName || 'Client Organization',
         qrToken: cleanToken
       });
       setWorkflowState('form');

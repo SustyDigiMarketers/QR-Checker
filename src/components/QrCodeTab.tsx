@@ -62,6 +62,13 @@ export default function QrCodeTab({
   const activeBuilding = activeRoom ? safeBuildings.find(b => b.id === activeRoom.buildingId) : null;
   const activeFloor = activeRoom ? safeFloors.find(f => f.id === activeRoom.floorId) : null;
 
+  // Helper to construct full scanning URL for QR code encoding
+  const getQrFullUrl = (token: string) => {
+    if (!token) return '';
+    const origin = window.location.origin || 'https://qr-checker-zhj9.onrender.com';
+    return `${origin}/scan/${encodeURIComponent(token)}`;
+  };
+
   // Print function (opens standard browser print dialog)
   const handlePrintBadge = () => {
     const printableArea = document.getElementById('printable-qr-badge');
@@ -70,10 +77,12 @@ export default function QrCodeTab({
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
+    const fullScanUrl = getQrFullUrl(activeQr?.token || '');
+
     printWindow.document.write(`
       <html>
         <head>
-          <title>Print QR Badge - CleanCheck</title>
+          <title>CleanCheck - Facility Compliance Badge</title>
           <style>
             body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; }
             .badge-card { border: 2px solid #2E7D32; border-radius: 16px; padding: 30px; text-align: center; max-width: 320px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
@@ -89,7 +98,7 @@ export default function QrCodeTab({
           <div class="badge-card">
             <div class="badge-title">CLEANCHECK</div>
             <div class="badge-subtitle">FACILITY COMPLIANCE BADGE</div>
-            <img class="qr-image" src="https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(activeQr?.token || '')}" />
+            <img class="qr-image" src="https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(fullScanUrl)}" />
             <div class="room-name">${activeRoom?.name}</div>
             <div class="location-text">${activeBuilding?.name} • ${activeFloor?.name}</div>
             <div class="scan-inst">SCAN QR TO LOG INSPECTION</div>
@@ -211,7 +220,7 @@ export default function QrCodeTab({
               {/* Secure QR Server Image */}
               <div className="bg-white p-3.5 rounded-xl border border-gray-100 shadow-xs mb-3">
                 <img
-                  src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(activeQr.token)}`}
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(getQrFullUrl(activeQr.token))}`}
                   alt="Room QR Code"
                   className="w-40 h-40 object-contain"
                 />

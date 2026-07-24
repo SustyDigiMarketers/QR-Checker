@@ -15,7 +15,17 @@ import {
   Search,
   Check,
   Menu,
-  X
+  X,
+  QrCode,
+  Camera,
+  CheckCircle,
+  ArrowRight,
+  MapPin,
+  Star,
+  User as UserIcon,
+  RefreshCw,
+  LogOut,
+  ChevronRight
 } from 'lucide-react';
 
 // Import Types
@@ -45,7 +55,7 @@ import InspectorPortal from './components/InspectorPortal';
 import AssignmentsTab from './components/AssignmentsTab';
 import InspectorsTab from './components/InspectorsTab';
 import ReportsTab from './components/ReportsTab';
-import { Assignment } from './types';
+import { Assignment, extractQrToken } from './types';
 
 export default function App() {
   
@@ -56,6 +66,13 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState<boolean>(false);
+
+  // Public Gateway / Mobile QR Routing States
+  const [publicView, setPublicView] = useState<'landing' | 'scanner' | 'room_details' | 'login'>('landing');
+  const [scannedToken, setScannedToken] = useState<string | null>(null);
+  const [publicRoomData, setPublicRoomData] = useState<any | null>(null);
+  const [isPublicScanLoading, setIsPublicScanLoading] = useState<boolean>(false);
+  const [publicScanError, setPublicScanError] = useState<string | null>(null);
 
   // Notification and Global Search States
   const [notifications, setNotifications] = useState<{ id: string; title: string; message: string; timestamp: Date; type: 'alert' | 'info' | 'success'; read: boolean }[]>([
@@ -290,6 +307,49 @@ export default function App() {
         setCurrentUser(userObj);
       } catch (e) {
         console.error('Failed to restore active session:', e);
+      }
+    }
+  }, []);
+
+  // Detect URL path or QR token parameters on load
+  useEffect(() => {
+    const href = window.location.href;
+    const path = window.location.pathname;
+    const token = extractQrToken(href);
+
+    if (token && token !== 'scan' && token !== 'qr' && token !== 'verify') {
+      setScannedToken(token);
+      setIsPublicScanLoading(true);
+      setPublicScanError(null);
+
+      fetch(`/api/scan/${encodeURIComponent(token)}`, {
+        headers: getAuthHeaders()
+      })
+        .then(async res => {
+          const data = await res.json();
+          if (!res.ok) {
+            throw new Error(data.error || 'Failed to validate QR badge token.');
+          }
+          return data;
+        })
+        .then(data => {
+          setPublicRoomData(data);
+          if (!localStorage.getItem('cleancheck_user')) {
+            setPublicView('room_details');
+          }
+        })
+        .catch(err => {
+          setPublicScanError(err.message || 'The QR code token is invalid, expired, or has been disabled.');
+          if (!localStorage.getItem('cleancheck_user')) {
+            setPublicView('room_details');
+          }
+        })
+        .finally(() => {
+          setIsPublicScanLoading(false);
+        });
+    } else if (path === '/scan' || path === '/qr' || path === '/verify') {
+      if (!localStorage.getItem('cleancheck_user')) {
+        setPublicView('scanner');
       }
     }
   }, []);
@@ -948,322 +1008,623 @@ export default function App() {
 
   // --- RENDERING ROUTER FLOW ---
 
-  // 1. SIGN IN SCREEN if no user session found
+  // 1. PUBLIC GATEWAY / SIGN IN SCREEN if no active user session
   if (!currentUser) {
+    if (isPublicScanLoading) {
+      return (
+        <div className="min-h-screen bg-[#FAFAF8] flex flex-col justify-center items-center p-4 font-sans text-center">
+          <div className="w-12 h-12 bg-[#2E7D32] text-white rounded-2xl flex items-center justify-center shadow-lg animate-pulse mb-4">
+            <ClipboardCheck className="w-6 h-6" />
+          </div>
+          <h2 className="text-lg font-black text-[#1F2937] uppercase tracking-tight">Resolving CleanCheck Badge...</h2>
+          <p className="text-xs text-gray-400 font-bold mt-1">Fetching facility compliance metadata from MongoDB cloud servers</p>
+          <Loader2 className="w-5 h-5 text-[#2E7D32] animate-spin mt-4" />
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-[#FAFAF8] flex flex-col justify-center items-center p-4 selection:bg-[#E8F5E9] font-sans">
         
-        {/* Sign in card */}
-        <div className="bg-white border border-[#E9E5DE] rounded-3xl p-6 md:p-8 max-w-md w-full shadow-md flex flex-col gap-6 relative overflow-hidden" id="login-container">
-          
-          <div className="absolute top-0 left-0 w-full h-1.5 bg-[#2E7D32]" />
-          
-          {/* Logo brand */}
-          <div className="flex flex-col items-center text-center gap-3 mt-2">
-            <div className="w-12 h-12 bg-[#2E7D32] text-white rounded-2xl flex items-center justify-center shadow-lg shadow-[#2E7D32]/10">
-              <ClipboardCheck className="w-6 h-6" />
+        {/* PUBLIC ROOM VERIFICATION VIEW */}
+        {publicView === 'room_details' && (
+          <div className="bg-white border border-[#E9E5DE] rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-lg flex flex-col gap-6 relative overflow-hidden" id="public-room-view">
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-[#2E7D32]" />
+
+            <div className="flex justify-between items-center border-b border-gray-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-[#2E7D32] text-white rounded-xl flex items-center justify-center shadow-md">
+                  <ClipboardCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h1 className="text-base font-black text-[#1F2937] uppercase tracking-tight">CleanCheck</h1>
+                  <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Facility Compliance System</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setPublicView('landing')}
+                className="text-xs font-extrabold text-[#2E7D32] bg-[#E8F5E9] hover:bg-green-100 px-3 py-1.5 rounded-lg uppercase tracking-wider"
+              >
+                Home
+              </button>
             </div>
-            <div>
-              <h1 className="text-xl font-black text-[#1F2937] uppercase tracking-tight">CleanCheck</h1>
-              <p className="text-xs text-gray-400 font-bold mt-0.5 uppercase tracking-wider">Facility Compliance System</p>
+
+            {publicScanError ? (
+              <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-2xl text-xs font-semibold flex flex-col gap-2">
+                <div className="flex items-center gap-2 font-bold text-sm">
+                  <AlertCircle className="w-5 h-5 text-red-600" />
+                  <span>Invalid or Disabled QR Badge</span>
+                </div>
+                <p>{publicScanError}</p>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    onClick={() => setPublicView('scanner')}
+                    className="py-2 px-4 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-sm"
+                  >
+                    Scan Another Code
+                  </button>
+                </div>
+              </div>
+            ) : publicRoomData ? (
+              <div className="flex flex-col gap-5">
+                <div className="flex items-center justify-between bg-emerald-50 border border-emerald-200 p-3.5 rounded-2xl">
+                  <div className="flex items-center gap-2 text-emerald-800 text-xs font-extrabold uppercase tracking-wide">
+                    <CheckCircle className="w-4.5 h-4.5 text-emerald-600" />
+                    <span>Official CleanCheck Verified Badge</span>
+                  </div>
+                  <span className="bg-emerald-600 text-white text-[9px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full">
+                    Active
+                  </span>
+                </div>
+
+                <div className="bg-gray-50 border border-gray-150 p-5 rounded-2xl flex flex-col gap-3">
+                  <div>
+                    <span className="text-[10px] font-extrabold text-gray-400 uppercase tracking-wider">Scanned Room / Area</span>
+                    <h2 className="text-xl font-black text-gray-900 mt-0.5">{publicRoomData.roomName || publicRoomData.room?.name || 'Facility Room'}</h2>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 pt-2 border-t border-gray-200 text-xs">
+                    <div>
+                      <span className="text-[9px] font-extrabold text-gray-400 uppercase tracking-wider block">Building</span>
+                      <span className="font-bold text-gray-800 flex items-center gap-1 mt-0.5">
+                        <Building className="w-3.5 h-3.5 text-gray-400" />
+                        {publicRoomData.buildingName || 'Main Facility'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[9px] font-extrabold text-gray-400 uppercase tracking-wider block">Floor</span>
+                      <span className="font-bold text-gray-800 flex items-center gap-1 mt-0.5">
+                        <MapPin className="w-3.5 h-3.5 text-gray-400" />
+                        {publicRoomData.floorName || 'Floor Level'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-gray-200 text-xs">
+                    <span className="text-[9px] font-extrabold text-gray-400 uppercase tracking-wider block">Organization</span>
+                    <span className="font-bold text-gray-800 mt-0.5 block">{publicRoomData.organizationName || 'Client Organization'}</span>
+                  </div>
+                </div>
+
+                {/* Last Inspection Status */}
+                {publicRoomData.lastInspection ? (
+                  <div className="bg-white border border-gray-200 p-4 rounded-2xl flex flex-col gap-2">
+                    <span className="text-[10px] font-extrabold text-gray-400 uppercase tracking-wider">Most Recent Cleaning Audit</span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black text-green-700 bg-green-50 border border-green-200 px-2.5 py-1 rounded-lg">
+                        {publicRoomData.lastInspection.cleaned ? 'Cleaned & Sanitized' : 'Needs Maintenance'}
+                      </span>
+                      <div className="flex items-center gap-1 text-amber-500 text-xs font-bold">
+                        <Star className="w-4 h-4 fill-amber-400 text-amber-400" />
+                        <span>{publicRoomData.lastInspection.rating || 5} / 5</span>
+                      </div>
+                    </div>
+                    {publicRoomData.lastInspection.remarks && (
+                      <p className="text-xs text-gray-600 bg-gray-50 p-2.5 rounded-xl border border-gray-100 italic mt-1">
+                        "{publicRoomData.lastInspection.remarks}"
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="bg-gray-50 border border-gray-150 p-4 rounded-2xl text-center text-xs text-gray-500 font-bold">
+                    No recent inspection records logged for this room today.
+                  </div>
+                )}
+
+                <div className="flex flex-col gap-2.5 pt-2">
+                  <button
+                    onClick={() => {
+                      setAuthView('login');
+                      setPublicView('login');
+                    }}
+                    className="w-full py-3.5 bg-[#2E7D32] hover:bg-[#1B5E20] text-white rounded-xl text-xs font-extrabold shadow-md flex items-center justify-center gap-2 transition-all"
+                  >
+                    <UserIcon className="w-4 h-4" />
+                    <span>Inspector Login & Submit Audit</span>
+                  </button>
+
+                  <button
+                    onClick={() => setPublicView('scanner')}
+                    className="w-full py-3 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-xl text-xs font-extrabold flex items-center justify-center gap-2 transition-all"
+                  >
+                    <Camera className="w-4 h-4" />
+                    <span>Scan Another Room Badge</span>
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        )}
+
+        {/* PUBLIC SCANNER VIEW */}
+        {publicView === 'scanner' && (
+          <div className="bg-white border border-[#E9E5DE] rounded-3xl p-6 max-w-md w-full shadow-lg flex flex-col gap-6 relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-[#2E7D32]" />
+
+            <div className="flex justify-between items-center border-b border-gray-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 bg-[#2E7D32] text-white rounded-lg flex items-center justify-center">
+                  <QrCode className="w-4 h-4" />
+                </div>
+                <h2 className="text-sm font-black text-gray-800 uppercase tracking-tight">CleanCheck Public Scanner</h2>
+              </div>
+              <button
+                onClick={() => setPublicView('landing')}
+                className="text-xs font-bold text-gray-500 hover:text-gray-800 bg-gray-100 px-2.5 py-1 rounded-lg"
+              >
+                Close
+              </button>
+            </div>
+
+            <ScannerTab
+              currentUser={null as any}
+              rooms={[]}
+              onAddInspection={async () => {}}
+              onManualScanToken={(token) => {
+                const cleanToken = extractQrToken(token);
+                if (cleanToken) {
+                  setScannedToken(cleanToken);
+                  setIsPublicScanLoading(true);
+                  fetch(`/api/scan/${encodeURIComponent(cleanToken)}`, { headers: getAuthHeaders() })
+                    .then(res => res.json())
+                    .then(data => {
+                      setPublicRoomData(data);
+                      setPublicView('room_details');
+                    })
+                    .catch(err => {
+                      setPublicScanError(err.message);
+                      setPublicView('room_details');
+                    })
+                    .finally(() => setIsPublicScanLoading(false));
+                }
+              }}
+            />
+
+            <div className="border-t border-gray-100 pt-3 flex justify-between items-center">
+              <button
+                onClick={() => { setAuthView('login'); setPublicView('login'); }}
+                className="text-xs font-extrabold text-[#2E7D32] hover:underline flex items-center gap-1"
+              >
+                <span>Inspector Sign In</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => setPublicView('landing')}
+                className="text-xs font-bold text-gray-400 hover:text-gray-600"
+              >
+                Back to Home
+              </button>
             </div>
           </div>
+        )}
 
-          {errorMessage && (
-            <div className="bg-red-50 border border-red-150 text-red-700 p-3.5 rounded-xl text-xs font-semibold flex items-start gap-2 animate-fade-in" id="login-error">
-              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-              <span>{errorMessage}</span>
+        {/* PUBLIC LANDING VIEW */}
+        {publicView === 'landing' && (
+          <div className="bg-white border border-[#E9E5DE] rounded-3xl p-6 md:p-8 max-w-md w-full shadow-lg flex flex-col gap-6 relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-[#2E7D32]" />
+
+            <div className="flex flex-col items-center text-center gap-3 mt-1">
+              <div className="w-14 h-14 bg-[#2E7D32] text-white rounded-2xl flex items-center justify-center shadow-lg shadow-[#2E7D32]/10">
+                <ClipboardCheck className="w-7 h-7" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-black text-[#1F2937] uppercase tracking-tight">CleanCheck</h1>
+                <p className="text-xs text-gray-400 font-bold mt-0.5 uppercase tracking-wider">Facility Compliance System</p>
+              </div>
             </div>
-          )}
 
-          {/* VIEW: LOGIN */}
-          {authView === 'login' && (
-            <form onSubmit={handleLoginSubmit} className="flex flex-col gap-4">
-              <div>
-                <label className="block text-[10px] font-extrabold text-gray-400 uppercase tracking-wider mb-2">Username or Email Address</label>
-                <input
-                  required
-                  type="text"
-                  placeholder="Enter username or email"
-                  value={loginUsername}
-                  onChange={(e) => setLoginUsername(e.target.value)}
-                  className="w-full text-sm bg-[#FAFAF8] border border-[#E9E5DE] rounded-xl p-3.5 focus:outline-none focus:ring-1 focus:ring-[#2E7D32] placeholder-gray-400 font-bold text-[#1F2937]"
-                  id="login-username-input"
-                />
-              </div>
+            <p className="text-xs text-gray-600 text-center font-medium leading-relaxed bg-gray-50 border border-gray-150 p-3.5 rounded-2xl">
+              Enterprise QR inspection, cleaning compliance tracking, and automated facility audit reports.
+            </p>
 
-              <div>
-                <div className="flex justify-between items-center mb-2">
-                  <label className="block text-[10px] font-extrabold text-gray-400 uppercase tracking-wider">Password</label>
-                  <button 
-                    type="button"
-                    onClick={() => { setAuthView('forgot'); setErrorMessage(null); }}
-                    className="text-[10px] font-extrabold text-[#2E7D32] hover:underline"
-                  >
-                    Forgot Password?
-                  </button>
-                </div>
-                <div className="relative">
-                  <input
-                    required
-                    type={showPassword ? "text" : "password"}
-                    placeholder="Enter password"
-                    value={loginPassword}
-                    onChange={(e) => setLoginPassword(e.target.value)}
-                    className="w-full text-sm bg-[#FAFAF8] border border-[#E9E5DE] rounded-xl pl-3.5 pr-12 py-3.5 focus:outline-none focus:ring-1 focus:ring-[#2E7D32] placeholder-gray-400 font-bold text-[#1F2937]"
-                    id="login-password-input"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-gray-600 focus:outline-none"
-                    title={showPassword ? "Hide password" : "Show password"}
-                  >
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
-
-              {/* Remember Me Option */}
-              <div className="flex items-center gap-2 py-1">
-                <input 
-                  type="checkbox" 
-                  id="remember-me-chk"
-                  checked={rememberMe}
-                  onChange={(e) => setRememberMe(e.target.checked)}
-                  className="rounded text-[#2E7D32] focus:ring-[#2E7D32] w-4 h-4 border-[#E9E5DE]"
-                />
-                <label htmlFor="remember-me-chk" className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider cursor-pointer select-none">
-                  Remember my session secure key
-                </label>
-              </div>
-
+            <div className="flex flex-col gap-3">
               <button
-                type="submit"
-                disabled={isProcessing}
-                className="w-full py-3.5 bg-[#2E7D32] hover:bg-[#1B5E20] disabled:bg-gray-300 text-white rounded-xl text-xs font-extrabold shadow-md shadow-[#2E7D32]/10 flex items-center justify-center gap-2 transition-all active:scale-98"
-                id="login-submit-btn"
+                onClick={() => setPublicView('scanner')}
+                className="w-full py-3.5 bg-[#2E7D32] hover:bg-[#1B5E20] text-white rounded-2xl text-xs font-black uppercase tracking-wider shadow-md flex items-center justify-center gap-2.5 transition-all active:scale-98"
               >
-                {isProcessing ? (
-                  <>
-                    <Loader2 className="w-4.5 h-4.5 animate-spin text-white" />
-                    <span>Unlocking credentials...</span>
-                  </>
-                ) : (
-                  <>
-                    <ShieldCheck className="w-4.5 h-4.5 text-[#C8A165]" />
-                    <span>Authenticate Credentials</span>
-                  </>
-                )}
+                <Camera className="w-4.5 h-4.5" />
+                <span>Open QR Badge Camera Scanner</span>
               </button>
 
-              <div className="text-center mt-1">
+              <button
+                onClick={() => { setAuthView('login'); setPublicView('login'); }}
+                className="w-full py-3.5 bg-[#1F2937] hover:bg-black text-white rounded-2xl text-xs font-black uppercase tracking-wider shadow-sm flex items-center justify-center gap-2.5 transition-all"
+              >
+                <UserIcon className="w-4.5 h-4.5" />
+                <span>Inspector & Manager Sign In</span>
+              </button>
+            </div>
+
+            {/* Quick Demo Credentials Access */}
+            <div className="bg-amber-50/80 border border-amber-200 p-4 rounded-2xl flex flex-col gap-2.5">
+              <span className="text-[10px] font-extrabold text-amber-800 uppercase tracking-wider flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                Quick Test Account Access
+              </span>
+              <div className="grid grid-cols-2 gap-2">
                 <button
-                  type="button"
-                  onClick={() => { setAuthView('change'); setErrorMessage(null); }}
-                  className="text-[10px] font-extrabold text-gray-400 hover:text-gray-600 uppercase tracking-wider"
+                  onClick={() => {
+                    setLoginUsername('superadmin');
+                    setLoginPassword('Admin123!');
+                    setAuthView('login');
+                    setPublicView('login');
+                  }}
+                  className="bg-white hover:bg-amber-100/50 border border-amber-300 text-amber-900 py-2 px-2.5 rounded-xl text-[10px] font-bold text-center"
                 >
-                  Change Existing Password
+                  Super Admin
+                </button>
+                <button
+                  onClick={() => {
+                    setLoginUsername('inspector1');
+                    setLoginPassword('Clean123!');
+                    setAuthView('login');
+                    setPublicView('login');
+                  }}
+                  className="bg-white hover:bg-amber-100/50 border border-amber-300 text-amber-900 py-2 px-2.5 rounded-xl text-[10px] font-bold text-center"
+                >
+                  Demo Inspector
                 </button>
               </div>
-            </form>
-          )}
+            </div>
 
-          {/* VIEW: FORGOT PASSWORD */}
-          {authView === 'forgot' && (
-            <form onSubmit={handleForgotPasswordSubmit} className="flex flex-col gap-4">
-              <div>
-                <label className="block text-[10px] font-extrabold text-gray-400 uppercase tracking-wider mb-2">Registered Email Address</label>
-                <input
-                  required
-                  type="email"
-                  placeholder="Enter your registered email"
-                  value={forgotEmail}
-                  onChange={(e) => setForgotEmail(e.target.value)}
-                  className="w-full text-sm bg-[#FAFAF8] border border-[#E9E5DE] rounded-xl p-3.5 focus:outline-none focus:ring-1 focus:ring-[#2E7D32] placeholder-gray-400 font-bold text-[#1F2937]"
-                />
-              </div>
+            <div className="flex justify-between items-center border-t border-gray-100 pt-3 text-[9px] font-extrabold text-gray-400 uppercase tracking-wider">
+              <span>CleanCheck v1.0.0</span>
+              <span>Render Production Active</span>
+            </div>
+          </div>
+        )}
 
-              <div className="bg-amber-50 border border-amber-200 text-amber-800 p-3 rounded-xl text-[10px] font-bold leading-relaxed">
-                SMTP Gateway Status: Automated email dispatch is unconfigured in v1.0.0. Secure reset tokens are routed directly to the system runtime console logs for admin-assisted credential restores. Please contact your system administrator.
-              </div>
-
+        {/* LOGIN FORM VIEW */}
+        {publicView === 'login' && (
+          <div className="bg-white border border-[#E9E5DE] rounded-3xl p-6 md:p-8 max-w-md w-full shadow-md flex flex-col gap-6 relative overflow-hidden" id="login-container">
+            
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-[#2E7D32]" />
+            
+            <div className="flex justify-between items-center">
               <button
-                type="submit"
-                disabled={isProcessing}
-                className="w-full py-3.5 bg-[#2E7D32] hover:bg-[#1B5E20] disabled:bg-gray-300 text-white rounded-xl text-xs font-extrabold shadow-md flex items-center justify-center gap-2 transition-all"
+                type="button"
+                onClick={() => setPublicView('landing')}
+                className="text-xs font-extrabold text-gray-400 hover:text-gray-600 flex items-center gap-1 uppercase tracking-wider"
               >
-                {isProcessing ? 'Processing request...' : 'Generate Reset Token'}
+                ← Back to Home
               </button>
+              <button
+                type="button"
+                onClick={() => setPublicView('scanner')}
+                className="text-xs font-extrabold text-[#2E7D32] bg-emerald-50 px-2.5 py-1 rounded-lg uppercase tracking-wider flex items-center gap-1"
+              >
+                <QrCode className="w-3.5 h-3.5" />
+                Scan Badge
+              </button>
+            </div>
 
-              <div className="flex justify-between items-center mt-2">
+            {/* Logo brand */}
+            <div className="flex flex-col items-center text-center gap-2">
+              <div className="w-12 h-12 bg-[#2E7D32] text-white rounded-2xl flex items-center justify-center shadow-lg shadow-[#2E7D32]/10">
+                <ClipboardCheck className="w-6 h-6" />
+              </div>
+              <div>
+                <h1 className="text-xl font-black text-[#1F2937] uppercase tracking-tight">CleanCheck</h1>
+                <p className="text-xs text-gray-400 font-bold mt-0.5 uppercase tracking-wider">Facility Compliance System</p>
+              </div>
+            </div>
+
+            {errorMessage && (
+              <div className="bg-red-50 border border-red-150 text-red-700 p-3.5 rounded-xl text-xs font-semibold flex items-start gap-2 animate-fade-in" id="login-error">
+                <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                <span>{errorMessage}</span>
+              </div>
+            )}
+
+            {/* VIEW: LOGIN */}
+            {authView === 'login' && (
+              <form onSubmit={handleLoginSubmit} className="flex flex-col gap-4">
+                <div>
+                  <label className="block text-[10px] font-extrabold text-gray-400 uppercase tracking-wider mb-2">Username or Email Address</label>
+                  <input
+                    required
+                    type="text"
+                    placeholder="Enter username or email"
+                    value={loginUsername}
+                    onChange={(e) => setLoginUsername(e.target.value)}
+                    className="w-full text-sm bg-[#FAFAF8] border border-[#E9E5DE] rounded-xl p-3.5 focus:outline-none focus:ring-1 focus:ring-[#2E7D32] placeholder-gray-400 font-bold text-[#1F2937]"
+                    id="login-username-input"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="block text-[10px] font-extrabold text-gray-400 uppercase tracking-wider">Password</label>
+                    <button 
+                      type="button"
+                      onClick={() => { setAuthView('forgot'); setErrorMessage(null); }}
+                      className="text-[10px] font-extrabold text-[#2E7D32] hover:underline"
+                    >
+                      Forgot Password?
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <input
+                      required
+                      type={showPassword ? "text" : "password"}
+                      placeholder="Enter password"
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      className="w-full text-sm bg-[#FAFAF8] border border-[#E9E5DE] rounded-xl pl-3.5 pr-12 py-3.5 focus:outline-none focus:ring-1 focus:ring-[#2E7D32] placeholder-gray-400 font-bold text-[#1F2937]"
+                      id="login-password-input"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute inset-y-0 right-0 pr-4 flex items-center text-gray-400 hover:text-gray-600 focus:outline-none"
+                      title={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Remember Me Option */}
+                <div className="flex items-center gap-2 py-1">
+                  <input 
+                    type="checkbox" 
+                    id="remember-me-chk"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="rounded text-[#2E7D32] focus:ring-[#2E7D32] w-4 h-4 border-[#E9E5DE]"
+                  />
+                  <label htmlFor="remember-me-chk" className="text-[11px] font-extrabold text-gray-500 uppercase tracking-wider cursor-pointer select-none">
+                    Remember my session secure key
+                  </label>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isProcessing}
+                  className="w-full py-3.5 bg-[#2E7D32] hover:bg-[#1B5E20] disabled:bg-gray-300 text-white rounded-xl text-xs font-extrabold shadow-md shadow-[#2E7D32]/10 flex items-center justify-center gap-2 transition-all active:scale-98"
+                  id="login-submit-btn"
+                >
+                  {isProcessing ? (
+                    <>
+                      <Loader2 className="w-4.5 h-4.5 animate-spin text-white" />
+                      <span>Unlocking credentials...</span>
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck className="w-4.5 h-4.5 text-[#C8A165]" />
+                      <span>Authenticate Credentials</span>
+                    </>
+                  )}
+                </button>
+
+                <div className="text-center mt-1">
+                  <button
+                    type="button"
+                    onClick={() => { setAuthView('change'); setErrorMessage(null); }}
+                    className="text-[10px] font-extrabold text-gray-400 hover:text-gray-600 uppercase tracking-wider"
+                  >
+                    Change Existing Password
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* VIEW: FORGOT PASSWORD */}
+            {authView === 'forgot' && (
+              <form onSubmit={handleForgotPasswordSubmit} className="flex flex-col gap-4">
+                <div>
+                  <label className="block text-[10px] font-extrabold text-gray-400 uppercase tracking-wider mb-2">Registered Email Address</label>
+                  <input
+                    required
+                    type="email"
+                    placeholder="Enter your registered email"
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    className="w-full text-sm bg-[#FAFAF8] border border-[#E9E5DE] rounded-xl p-3.5 focus:outline-none focus:ring-1 focus:ring-[#2E7D32] placeholder-gray-400 font-bold text-[#1F2937]"
+                  />
+                </div>
+
+                <div className="bg-amber-50 border border-amber-200 text-amber-800 p-3 rounded-xl text-[10px] font-bold leading-relaxed">
+                  SMTP Gateway Status: Automated email dispatch is unconfigured in v1.0.0. Secure reset tokens are routed directly to the system runtime console logs for admin-assisted credential restores. Please contact your system administrator.
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isProcessing}
+                  className="w-full py-3.5 bg-[#2E7D32] hover:bg-[#1B5E20] disabled:bg-gray-300 text-white rounded-xl text-xs font-extrabold shadow-md flex items-center justify-center gap-2 transition-all"
+                >
+                  {isProcessing ? 'Processing request...' : 'Generate Reset Token'}
+                </button>
+
+                <div className="flex justify-between items-center mt-2">
+                  <button
+                    type="button"
+                    onClick={() => { setAuthView('login'); setErrorMessage(null); }}
+                    className="text-[10px] font-extrabold text-[#2E7D32] uppercase tracking-wider hover:underline"
+                  >
+                    Back to Sign In
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setAuthView('reset'); setErrorMessage(null); }}
+                    className="text-[10px] font-extrabold text-gray-400 uppercase tracking-wider hover:underline"
+                  >
+                    Have a Token? Reset Here
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* VIEW: RESET PASSWORD */}
+            {authView === 'reset' && (
+              <form onSubmit={handleResetPasswordSubmit} className="flex flex-col gap-4">
+                <div>
+                  <label className="block text-[10px] font-extrabold text-gray-400 uppercase tracking-wider mb-2">Reset Authorization Token</label>
+                  <input
+                    required
+                    type="text"
+                    placeholder="Enter the token printed in server logs"
+                    value={resetToken}
+                    onChange={(e) => setResetToken(e.target.value)}
+                    className="w-full text-sm bg-[#FAFAF8] border border-[#E9E5DE] rounded-xl p-3.5 focus:outline-none focus:ring-1 focus:ring-[#2E7D32] placeholder-gray-400 font-bold text-[#1F2937]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-extrabold text-gray-400 uppercase tracking-wider mb-2">New Secure Password</label>
+                  <input
+                    required
+                    type="password"
+                    placeholder="Must contain uppercase, lowercase, number, symbol"
+                    value={newPassword}
+                    onChange={(e) => handlePasswordChangeInput(e.target.value)}
+                    className="w-full text-sm bg-[#FAFAF8] border border-[#E9E5DE] rounded-xl p-3.5 focus:outline-none focus:ring-1 focus:ring-[#2E7D32] placeholder-gray-400 font-bold text-[#1F2937]"
+                  />
+                  
+                  {/* Password Strength Meter */}
+                  {newPassword && (
+                    <div className="mt-2.5 bg-gray-50 p-2.5 rounded-lg border border-gray-100 flex flex-col gap-1 animate-fade-in">
+                      <div className="flex justify-between text-[9px] font-extrabold uppercase tracking-wide">
+                        <span className="text-gray-400">Security Rating:</span>
+                        <span className={
+                          passwordStrength.score >= 3 ? 'text-green-600' : 'text-red-500'
+                        }>
+                          {passwordStrength.feedback}
+                        </span>
+                      </div>
+                      <div className="w-full h-1 bg-gray-200 rounded-full overflow-hidden mt-1">
+                        <div 
+                          className={`h-full transition-all duration-300 ${
+                            passwordStrength.score === 1 ? 'w-1/4 bg-red-500' :
+                            passwordStrength.score === 2 ? 'w-2/4 bg-orange-400' :
+                            passwordStrength.score === 3 ? 'w-3/4 bg-blue-500' :
+                            passwordStrength.score === 4 ? 'w-full bg-green-500' : 'w-0'
+                          }`}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isProcessing}
+                  className="w-full py-3.5 bg-[#2E7D32] hover:bg-[#1B5E20] disabled:bg-gray-300 text-white rounded-xl text-xs font-extrabold shadow-md flex items-center justify-center gap-2 transition-all"
+                >
+                  {isProcessing ? 'Updating password...' : 'Apply Password Change'}
+                </button>
+
                 <button
                   type="button"
                   onClick={() => { setAuthView('login'); setErrorMessage(null); }}
-                  className="text-[10px] font-extrabold text-[#2E7D32] uppercase tracking-wider hover:underline"
+                  className="text-[10px] font-extrabold text-[#2E7D32] uppercase tracking-wider text-center hover:underline mt-1"
                 >
                   Back to Sign In
                 </button>
+              </form>
+            )}
+
+            {/* VIEW: CHANGE PASSWORD */}
+            {authView === 'change' && (
+              <form onSubmit={handleChangePasswordSubmit} className="flex flex-col gap-4">
+                <div>
+                  <label className="block text-[10px] font-extrabold text-gray-400 uppercase tracking-wider mb-2">Current Active Password</label>
+                  <input
+                    required
+                    type="password"
+                    placeholder="Enter current password"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    className="w-full text-sm bg-[#FAFAF8] border border-[#E9E5DE] rounded-xl p-3.5 focus:outline-none focus:ring-1 focus:ring-[#2E7D32] placeholder-gray-400 font-bold text-[#1F2937]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-extrabold text-gray-400 uppercase tracking-wider mb-2">New Secure Password</label>
+                  <input
+                    required
+                    type="password"
+                    placeholder="Must contain uppercase, lowercase, number, symbol"
+                    value={newPassword}
+                    onChange={(e) => handlePasswordChangeInput(e.target.value)}
+                    className="w-full text-sm bg-[#FAFAF8] border border-[#E9E5DE] rounded-xl p-3.5 focus:outline-none focus:ring-1 focus:ring-[#2E7D32] placeholder-gray-400 font-bold text-[#1F2937]"
+                  />
+                  
+                  {/* Password Strength Meter */}
+                  {newPassword && (
+                    <div className="mt-2.5 bg-gray-50 p-2.5 rounded-lg border border-gray-100 flex flex-col gap-1 animate-fade-in">
+                      <div className="flex justify-between text-[9px] font-extrabold uppercase tracking-wide">
+                        <span className="text-gray-400">Security Rating:</span>
+                        <span className={
+                          passwordStrength.score >= 3 ? 'text-green-600' : 'text-red-500'
+                        }>
+                          {passwordStrength.feedback}
+                        </span>
+                      </div>
+                      <div className="w-full h-1 bg-gray-200 rounded-full overflow-hidden mt-1">
+                        <div 
+                          className={`h-full transition-all duration-300 ${
+                            passwordStrength.score === 1 ? 'w-1/4 bg-red-500' :
+                            passwordStrength.score === 2 ? 'w-2/4 bg-orange-400' :
+                            passwordStrength.score === 3 ? 'w-3/4 bg-blue-500' :
+                            passwordStrength.score === 4 ? 'w-full bg-green-500' : 'w-0'
+                          }`}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isProcessing}
+                  className="w-full py-3.5 bg-[#2E7D32] hover:bg-[#1B5E20] disabled:bg-gray-300 text-white rounded-xl text-xs font-extrabold shadow-md flex items-center justify-center gap-2 transition-all"
+                >
+                  {isProcessing ? 'Updating password...' : 'Apply Password Change'}
+                </button>
+
                 <button
                   type="button"
-                  onClick={() => { setAuthView('reset'); setErrorMessage(null); }}
-                  className="text-[10px] font-extrabold text-gray-400 uppercase tracking-wider hover:underline"
+                  onClick={() => { setAuthView('login'); setErrorMessage(null); }}
+                  className="text-[10px] font-extrabold text-[#2E7D32] uppercase tracking-wider text-center hover:underline mt-1"
                 >
-                  Have a Token? Reset Here
+                  Back to Sign In
                 </button>
+              </form>
+            )}
+
+            {/* Version number and legal links */}
+            <div className="flex justify-between items-center border-t border-gray-100 pt-4 text-[9px] font-extrabold text-gray-400 uppercase tracking-wider">
+              <span>CleanCheck v1.0.0</span>
+              <div className="flex gap-2.5">
+                <a href="#privacy" className="hover:text-gray-600">Privacy Policy</a>
+                <span>•</span>
+                <a href="#terms" className="hover:text-gray-600">Terms of Service</a>
               </div>
-            </form>
-          )}
-
-          {/* VIEW: RESET PASSWORD */}
-          {authView === 'reset' && (
-            <form onSubmit={handleResetPasswordSubmit} className="flex flex-col gap-4">
-              <div>
-                <label className="block text-[10px] font-extrabold text-gray-400 uppercase tracking-wider mb-2">Reset Authorization Token</label>
-                <input
-                  required
-                  type="text"
-                  placeholder="Enter the token printed in server logs"
-                  value={resetToken}
-                  onChange={(e) => setResetToken(e.target.value)}
-                  className="w-full text-sm bg-[#FAFAF8] border border-[#E9E5DE] rounded-xl p-3.5 focus:outline-none focus:ring-1 focus:ring-[#2E7D32] placeholder-gray-400 font-bold text-[#1F2937]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-extrabold text-gray-400 uppercase tracking-wider mb-2">New Secure Password</label>
-                <input
-                  required
-                  type="password"
-                  placeholder="Must contain uppercase, lowercase, number, symbol"
-                  value={newPassword}
-                  onChange={(e) => handlePasswordChangeInput(e.target.value)}
-                  className="w-full text-sm bg-[#FAFAF8] border border-[#E9E5DE] rounded-xl p-3.5 focus:outline-none focus:ring-1 focus:ring-[#2E7D32] placeholder-gray-400 font-bold text-[#1F2937]"
-                />
-                
-                {/* Password Strength Meter */}
-                {newPassword && (
-                  <div className="mt-2.5 bg-gray-50 p-2.5 rounded-lg border border-gray-100 flex flex-col gap-1 animate-fade-in">
-                    <div className="flex justify-between text-[9px] font-extrabold uppercase tracking-wide">
-                      <span className="text-gray-400">Security Rating:</span>
-                      <span className={
-                        passwordStrength.score >= 3 ? 'text-green-600' : 'text-red-500'
-                      }>
-                        {passwordStrength.feedback}
-                      </span>
-                    </div>
-                    <div className="w-full h-1 bg-gray-200 rounded-full overflow-hidden mt-1">
-                      <div 
-                        className={`h-full transition-all duration-300 ${
-                          passwordStrength.score === 1 ? 'w-1/4 bg-red-500' :
-                          passwordStrength.score === 2 ? 'w-2/4 bg-orange-400' :
-                          passwordStrength.score === 3 ? 'w-3/4 bg-blue-500' :
-                          passwordStrength.score === 4 ? 'w-full bg-green-500' : 'w-0'
-                        }`}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <button
-                type="submit"
-                disabled={isProcessing}
-                className="w-full py-3.5 bg-[#2E7D32] hover:bg-[#1B5E20] disabled:bg-gray-300 text-white rounded-xl text-xs font-extrabold shadow-md flex items-center justify-center gap-2 transition-all"
-              >
-                {isProcessing ? 'Updating password...' : 'Apply Password Change'}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => { setAuthView('login'); setErrorMessage(null); }}
-                className="text-[10px] font-extrabold text-[#2E7D32] uppercase tracking-wider text-center hover:underline mt-1"
-              >
-                Back to Sign In
-              </button>
-            </form>
-          )}
-
-          {/* VIEW: CHANGE PASSWORD */}
-          {authView === 'change' && (
-            <form onSubmit={handleChangePasswordSubmit} className="flex flex-col gap-4">
-              <div>
-                <label className="block text-[10px] font-extrabold text-gray-400 uppercase tracking-wider mb-2">Current Active Password</label>
-                <input
-                  required
-                  type="password"
-                  placeholder="Enter current password"
-                  value={currentPassword}
-                  onChange={(e) => setCurrentPassword(e.target.value)}
-                  className="w-full text-sm bg-[#FAFAF8] border border-[#E9E5DE] rounded-xl p-3.5 focus:outline-none focus:ring-1 focus:ring-[#2E7D32] placeholder-gray-400 font-bold text-[#1F2937]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-extrabold text-gray-400 uppercase tracking-wider mb-2">New Secure Password</label>
-                <input
-                  required
-                  type="password"
-                  placeholder="Must contain uppercase, lowercase, number, symbol"
-                  value={newPassword}
-                  onChange={(e) => handlePasswordChangeInput(e.target.value)}
-                  className="w-full text-sm bg-[#FAFAF8] border border-[#E9E5DE] rounded-xl p-3.5 focus:outline-none focus:ring-1 focus:ring-[#2E7D32] placeholder-gray-400 font-bold text-[#1F2937]"
-                />
-                
-                {/* Password Strength Meter */}
-                {newPassword && (
-                  <div className="mt-2.5 bg-gray-50 p-2.5 rounded-lg border border-gray-100 flex flex-col gap-1 animate-fade-in">
-                    <div className="flex justify-between text-[9px] font-extrabold uppercase tracking-wide">
-                      <span className="text-gray-400">Security Rating:</span>
-                      <span className={
-                        passwordStrength.score >= 3 ? 'text-green-600' : 'text-red-500'
-                      }>
-                        {passwordStrength.feedback}
-                      </span>
-                    </div>
-                    <div className="w-full h-1 bg-gray-200 rounded-full overflow-hidden mt-1">
-                      <div 
-                        className={`h-full transition-all duration-300 ${
-                          passwordStrength.score === 1 ? 'w-1/4 bg-red-500' :
-                          passwordStrength.score === 2 ? 'w-2/4 bg-orange-400' :
-                          passwordStrength.score === 3 ? 'w-3/4 bg-blue-500' :
-                          passwordStrength.score === 4 ? 'w-full bg-green-500' : 'w-0'
-                        }`}
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <button
-                type="submit"
-                disabled={isProcessing}
-                className="w-full py-3.5 bg-[#2E7D32] hover:bg-[#1B5E20] disabled:bg-gray-300 text-white rounded-xl text-xs font-extrabold shadow-md flex items-center justify-center gap-2 transition-all"
-              >
-                {isProcessing ? 'Updating password...' : 'Apply Password Change'}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => { setAuthView('login'); setErrorMessage(null); }}
-                className="text-[10px] font-extrabold text-[#2E7D32] uppercase tracking-wider text-center hover:underline mt-1"
-              >
-                Back to Sign In
-              </button>
-            </form>
-          )}
-
-          {/* Version number and legal links */}
-          <div className="flex justify-between items-center border-t border-gray-100 pt-4 text-[9px] font-extrabold text-gray-400 uppercase tracking-wider">
-            <span>CleanCheck v1.0.0</span>
-            <div className="flex gap-2.5">
-              <a href="#privacy" className="hover:text-gray-600">Privacy Policy</a>
-              <span>•</span>
-              <a href="#terms" className="hover:text-gray-600">Terms of Service</a>
             </div>
-          </div>
 
-        </div>
+          </div>
+        )}
 
       </div>
     );
@@ -1285,6 +1646,7 @@ export default function App() {
           rooms={rooms}
           assignments={assignments}
           inspections={inspections}
+          initialToken={scannedToken || undefined}
           onAddInspection={handleAddInspection}
           onLogout={handleLogout}
           isProcessing={isProcessing}
