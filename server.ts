@@ -2870,17 +2870,31 @@ async function startServer() {
   }
 
   // Middleware: Authenticate user session
-  function requireAuth(req: any, res: any, next: () => void) {
+  async function requireAuth(req: any, res: any, next: () => void) {
     let userId: string | null = null;
+    let sessionToken: string | null = null;
     
     // Check Authorization header
     const authHeader = req.headers['authorization'];
     if (authHeader && authHeader.startsWith('Bearer ')) {
-      const token = authHeader.substring(7);
-      const session = activeSessions[token];
+      sessionToken = authHeader.substring(7);
+      let session = activeSessions[sessionToken];
+      
+      if (!session && mongoEnabled && mongoDb) {
+        try {
+          const dbSession = await mongoDb.collection('sessions').findOne({ id: sessionToken });
+          if (dbSession && new Date(dbSession.expiresAt) > new Date()) {
+            session = dbSession as any;
+            activeSessions[sessionToken] = session!;
+          }
+        } catch (e) {
+          console.error('[requireAuth Mongo Session Lookup Error]', e);
+        }
+      }
+
       if (session && new Date(session.expiresAt) > new Date()) {
         userId = session.userId;
-        req.sessionToken = token;
+        req.sessionToken = sessionToken;
       }
     }
     
@@ -2893,7 +2907,25 @@ async function startServer() {
       return res.status(401).json({ error: 'Authentication required. Please log in.' });
     }
     
-    const user = db.users.find(u => u.id === userId);
+    let user = db.users.find(u => u.id === userId);
+
+    if (!user && mongoEnabled && mongoDb) {
+      try {
+        const dbUser = await mongoDb.collection('users').findOne({ $or: [{ id: userId }, { _id: userId }] });
+        if (dbUser) {
+          user = { ...dbUser, id: dbUser.id || dbUser._id } as any;
+          const idx = db.users.findIndex(u => u.id === user!.id);
+          if (idx !== -1) {
+            db.users[idx] = user!;
+          } else {
+            db.users.push(user!);
+          }
+        }
+      } catch (e) {
+        console.error('[requireAuth Mongo User Lookup Error]', e);
+      }
+    }
+
     if (!user) {
       return res.status(401).json({ error: 'Session invalid: User not found.' });
     }
@@ -4467,34 +4499,101 @@ async function startServer() {
 
 
   // --- SCAN QR: VALIDATE TOKEN ---
-  app.get('/api/scan/:token', (req, res) => {
+  app.get('/api/scan/:token', requireAuth, async (req: any, res) => {
     const { token } = req.params;
-    const { userId } = req.query;
+    const user = req.user;
 
-    const room = db.rooms.find(r => r.qrToken === token);
+    let room = db.rooms.find(r => r.qrToken === token || r.id === token);
+    if (!room) {
+      const qrMatch = db.qrCodes.find(q => q.token === token || q.id === token);
+      if (qrMatch) {
+        room = db.rooms.find(r => r.id === qrMatch.roomId);
+      }
+    }
+
+    if (!room && mongoEnabled && mongoDb) {
+      try {
+        let dbRoom = await mongoDb.collection('rooms').findOne({ $or: [{ qrToken: token }, { id: token }, { _id: token }] });
+        if (!dbRoom) {
+          const dbQr = await mongoDb.collection('qrCodes').findOne({ $or: [{ token: token }, { id: token }] });
+          if (dbQr && dbQr.roomId) {
+            dbRoom = await mongoDb.collection('rooms').findOne({ $or: [{ id: dbQr.roomId }, { _id: dbQr.roomId }] });
+          }
+        }
+        if (dbRoom) {
+          room = { ...dbRoom, id: dbRoom.id || dbRoom._id } as any;
+          if (!db.rooms.some(r => r.id === room!.id)) db.rooms.push(room!);
+        }
+      } catch (e) {
+        console.error('[Scan Mongo Room Lookup Error]', e);
+      }
+    }
+
     if (!room) {
       return res.status(404).json({ error: 'Invalid or broken QR Code token. Please contact facility admin.' });
     }
 
-    const qrCode = db.qrCodes.find(q => q.roomId === room.id);
+    let qrCode = db.qrCodes.find(q => q.roomId === room!.id);
+    if (!qrCode && mongoEnabled && mongoDb) {
+      try {
+        const dbQr = await mongoDb.collection('qrCodes').findOne({ roomId: room!.id });
+        if (dbQr) {
+          qrCode = { ...dbQr, id: dbQr.id || dbQr._id } as any;
+          if (!db.qrCodes.some(q => q.id === qrCode!.id)) db.qrCodes.push(qrCode!);
+        }
+      } catch (e) {
+        console.error('[Scan Mongo QR Lookup Error]', e);
+      }
+    }
+
     if (qrCode && qrCode.status === 'Disabled') {
       return res.status(403).json({ error: 'This QR code token has been disabled by management.' });
     }
 
-    const floor = db.floors.find(f => f.id === room.floorId);
-    const building = db.buildings.find(b => b.id === room.buildingId);
-    const org = building ? db.organizations.find(o => o.id === building.organizationId) : null;
+    let floor = db.floors.find(f => f.id === room!.floorId);
+    if (!floor && mongoEnabled && mongoDb) {
+      try {
+        const dbFloor = await mongoDb.collection('floors').findOne({ id: room!.floorId });
+        if (dbFloor) {
+          floor = { ...dbFloor, id: dbFloor.id || dbFloor._id } as any;
+          if (!db.floors.some(f => f.id === floor!.id)) db.floors.push(floor!);
+        }
+      } catch (e) {
+        console.error('[Scan Mongo Floor Lookup Error]', e);
+      }
+    }
+
+    let building = db.buildings.find(b => b.id === room!.buildingId);
+    if (!building && mongoEnabled && mongoDb) {
+      try {
+        const dbBuilding = await mongoDb.collection('buildings').findOne({ id: room!.buildingId });
+        if (dbBuilding) {
+          building = { ...dbBuilding, id: dbBuilding.id || dbBuilding._id } as any;
+          if (!db.buildings.some(b => b.id === building!.id)) db.buildings.push(building!);
+        }
+      } catch (e) {
+        console.error('[Scan Mongo Building Lookup Error]', e);
+      }
+    }
+
+    let org = building ? db.organizations.find(o => o.id === building!.organizationId) : null;
+    if (!org && building && mongoEnabled && mongoDb) {
+      try {
+        const dbOrg = await mongoDb.collection('organizations').findOne({ id: building!.organizationId });
+        if (dbOrg) {
+          org = { ...dbOrg, id: dbOrg.id || dbOrg._id } as any;
+          if (!db.organizations.some(o => o.id === org!.id)) db.organizations.push(org!);
+        }
+      } catch (e) {
+        console.error('[Scan Mongo Org Lookup Error]', e);
+      }
+    }
 
     if (org && !org.active) {
       return res.status(403).json({ error: `Organization "${org.name}" is currently set to Inactive. Inspections are locked.` });
     }
 
-    if (userId) {
-      const user = db.users.find(u => u.id === userId);
-      if (!user) {
-        return res.status(401).json({ error: 'User is not authenticated.' });
-      }
-
+    if (user) {
       // Check organization alignment for security
       if (user.role !== 'Super Admin' && building && building.organizationId !== user.organizationId) {
         return res.status(403).json({ error: '❌ Access denied: This room belongs to a different organization.' });
@@ -4502,15 +4601,13 @@ async function startServer() {
 
       if (user.role === 'Inspector') {
         const todayStr = new Date().toISOString().split('T')[0];
-        const inspectorAssignments = (db.assignments || []).filter(a => a.inspectorId === userId && a.date === todayStr);
+        const inspectorAssignments = (db.assignments || []).filter(a => a.inspectorId === user.id && a.date === todayStr);
         
-        if (inspectorAssignments.length === 0) {
-          return res.status(403).json({ error: '❌ No shifts or assignments scheduled for you today. Please contact your supervisor.' });
-        }
-
-        const isAssigned = inspectorAssignments.some(a => a.roomIds.includes(room.id));
-        if (!isAssigned) {
-          return res.status(403).json({ error: '❌ This room is not assigned to you. Please contact your supervisor.' });
+        if (inspectorAssignments.length > 0) {
+          const isAssigned = inspectorAssignments.some(a => a.roomIds.includes(room!.id));
+          if (!isAssigned) {
+            return res.status(403).json({ error: '❌ This room is not assigned to you for today\'s shift. Please contact your supervisor.' });
+          }
         }
       }
     }
@@ -4518,7 +4615,7 @@ async function startServer() {
     if (qrCode) {
       qrCode.scansCount += 1;
       qrCode.lastScannedAt = new Date().toISOString();
-      dbUpdate('qrCodes', room.id, qrCode);
+      await dbUpdate('qrCodes', room.id, qrCode);
     }
 
     res.json({
@@ -4578,13 +4675,37 @@ async function startServer() {
       return res.status(403).json({ error: 'Access denied: You cannot submit audits for other inspectors.' });
     }
 
-    const room = db.rooms.find(r => r.id === roomId);
+    let room = db.rooms.find(r => r.id === roomId);
+    if (!room && mongoEnabled && mongoDb) {
+      try {
+        const dbRoom = await mongoDb.collection('rooms').findOne({ $or: [{ id: roomId }, { _id: roomId }] });
+        if (dbRoom) {
+          room = { ...dbRoom, id: dbRoom.id || dbRoom._id } as any;
+          if (!db.rooms.some(r => r.id === room!.id)) db.rooms.push(room!);
+        }
+      } catch (e) {
+        console.error('[Inspection Mongo Room Lookup Error]', e);
+      }
+    }
+
     if (!room) {
       return res.status(404).json({ error: 'Target room not found' });
     }
 
     // Verify organization alignment
-    const building = db.buildings.find(b => b.id === room.buildingId);
+    let building = db.buildings.find(b => b.id === room!.buildingId);
+    if (!building && mongoEnabled && mongoDb) {
+      try {
+        const dbBld = await mongoDb.collection('buildings').findOne({ $or: [{ id: room!.buildingId }, { _id: room!.buildingId }] });
+        if (dbBld) {
+          building = { ...dbBld, id: dbBld.id || dbBld._id } as any;
+          if (!db.buildings.some(b => b.id === building!.id)) db.buildings.push(building!);
+        }
+      } catch (e) {
+        console.error('[Inspection Mongo Building Lookup Error]', e);
+      }
+    }
+
     if (building && operator.role !== 'Super Admin' && building.organizationId !== operator.organizationId) {
       return res.status(403).json({ error: 'Access denied: Room belongs to a different organization.' });
     }
@@ -4601,9 +4722,44 @@ async function startServer() {
       }
     }
 
-    const floor = db.floors.find(f => f.id === room.floorId);
-    const org = building ? db.organizations.find(o => o.id === building.organizationId) : null;
-    const inspector = db.users.find(u => u.id === finalInspectorId);
+    let floor = db.floors.find(f => f.id === room!.floorId);
+    if (!floor && mongoEnabled && mongoDb) {
+      try {
+        const dbFloor = await mongoDb.collection('floors').findOne({ $or: [{ id: room!.floorId }, { _id: room!.floorId }] });
+        if (dbFloor) {
+          floor = { ...dbFloor, id: dbFloor.id || dbFloor._id } as any;
+          if (!db.floors.some(f => f.id === floor!.id)) db.floors.push(floor!);
+        }
+      } catch (e) {
+        console.error('[Inspection Mongo Floor Lookup Error]', e);
+      }
+    }
+
+    let org = building ? db.organizations.find(o => o.id === building!.organizationId) : null;
+    if (!org && building && mongoEnabled && mongoDb) {
+      try {
+        const dbOrg = await mongoDb.collection('organizations').findOne({ $or: [{ id: building!.organizationId }, { _id: building!.organizationId }] });
+        if (dbOrg) {
+          org = { ...dbOrg, id: dbOrg.id || dbOrg._id } as any;
+          if (!db.organizations.some(o => o.id === org!.id)) db.organizations.push(org!);
+        }
+      } catch (e) {
+        console.error('[Inspection Mongo Org Lookup Error]', e);
+      }
+    }
+
+    let inspector = db.users.find(u => u.id === finalInspectorId);
+    if (!inspector && mongoEnabled && mongoDb) {
+      try {
+        const dbInspector = await mongoDb.collection('users').findOne({ $or: [{ id: finalInspectorId }, { _id: finalInspectorId }] });
+        if (dbInspector) {
+          inspector = { ...dbInspector, id: dbInspector.id || dbInspector._id } as any;
+          if (!db.users.some(u => u.id === inspector!.id)) db.users.push(inspector!);
+        }
+      } catch (e) {
+        console.error('[Inspection Mongo Inspector Lookup Error]', e);
+      }
+    }
 
     const currentHour = new Date().getHours();
     let detectedShift: 'Morning' | 'Afternoon' | 'Night' = 'Night';

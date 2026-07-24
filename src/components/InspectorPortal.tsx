@@ -16,7 +16,7 @@ import {
   RefreshCw
 } from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
-import { Room, User, Assignment, Inspection } from '../types';
+import { Room, User, Assignment, Inspection, extractQrToken } from '../types';
 
 interface InspectorPortalProps {
   currentUser: User;
@@ -256,9 +256,22 @@ export default function InspectorPortal({
   }, [workflowState]);
 
   // Validate QR Token on Server
-  const handleValidateAndProcessToken = async (token: string) => {
+  const handleValidateAndProcessToken = async (rawInput: string) => {
     try {
-      const response = await fetch(`/api/scan/${token}`);
+      const cleanToken = extractQrToken(rawInput);
+      if (!cleanToken) {
+        throw new Error('Invalid QR code scanned. No valid token could be extracted.');
+      }
+
+      const jwtToken = localStorage.getItem('cleancheck_token');
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+      if (jwtToken) {
+        headers['Authorization'] = `Bearer ${jwtToken}`;
+      }
+
+      const response = await fetch(`/api/scan/${encodeURIComponent(cleanToken)}?userId=${currentUser.id}`, { headers });
       if (!response.ok) {
         const errData = await response.json();
         throw new Error(errData.error || 'Failed to validate QR badge token.');
@@ -271,7 +284,7 @@ export default function InspectorPortal({
         buildingName: data.buildingName,
         floorName: data.floorName,
         organizationName: data.organizationName,
-        qrToken: token
+        qrToken: cleanToken
       });
       setWorkflowState('form');
     } catch (err: any) {

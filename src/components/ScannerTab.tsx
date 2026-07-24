@@ -15,7 +15,7 @@ import {
   UploadCloud
 } from 'lucide-react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
-import { Room, User } from '../types';
+import { Room, User, extractQrToken } from '../types';
 
 interface ScannerTabProps {
   currentUser: User | null;
@@ -276,9 +276,23 @@ export default function ScannerTab({
   }, [workflowState]);
 
   // Unified function to validate token and transition to Inspection Form
-  const handleProcessToken = async (token: string) => {
+  const handleProcessToken = async (rawInput: string) => {
     try {
-      const response = await fetch(`/api/scan/${token}`);
+      const cleanToken = extractQrToken(rawInput);
+      if (!cleanToken) {
+        throw new Error('Invalid QR code scanned. No valid token could be extracted.');
+      }
+
+      const jwtToken = localStorage.getItem('cleancheck_token');
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+      if (jwtToken) {
+        headers['Authorization'] = `Bearer ${jwtToken}`;
+      }
+
+      const userIdParam = currentUser ? `?userId=${currentUser.id}` : '';
+      const response = await fetch(`/api/scan/${encodeURIComponent(cleanToken)}${userIdParam}`, { headers });
       if (!response.ok) {
         const errData = await response.json();
         throw new Error(errData.error || 'Failed to validate QR badge token.');

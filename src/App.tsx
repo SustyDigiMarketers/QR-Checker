@@ -68,8 +68,8 @@ export default function App() {
   const [showGlobalSearchResults, setShowGlobalSearchResults] = useState(false);
 
   // Authentication Fields
-  const [loginUsername, setLoginUsername] = useState<string>('admin');
-  const [loginPassword, setLoginPassword] = useState<string>('admin1234');
+  const [loginUsername, setLoginUsername] = useState<string>('');
+  const [loginPassword, setLoginPassword] = useState<string>('');
   const [rememberMe, setRememberMe] = useState<boolean>(true);
   const [showPassword, setShowPassword] = useState<boolean>(false);
   

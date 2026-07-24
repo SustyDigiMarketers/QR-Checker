@@ -1,3 +1,46 @@
+export function extractQrToken(rawInput: string): string {
+  if (!rawInput) return '';
+  let cleaned = String(rawInput).trim();
+
+  // Try parsing JSON if it's JSON encoded
+  if (cleaned.startsWith('{') && cleaned.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(cleaned);
+      if (parsed.qrToken) return String(parsed.qrToken).trim();
+      if (parsed.token) return String(parsed.token).trim();
+      if (parsed.roomId) return String(parsed.roomId).trim();
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  // Handle full URLs e.g. https://domain.com/scan/rm-101 or ?token=rm-101
+  if (cleaned.startsWith('http://') || cleaned.startsWith('https://')) {
+    try {
+      const url = new URL(cleaned);
+      const tokenParam = url.searchParams.get('token') || url.searchParams.get('qrToken') || url.searchParams.get('roomId');
+      if (tokenParam) return tokenParam.trim();
+
+      const pathSegments = url.pathname.split('/').filter(Boolean);
+      if (pathSegments.length > 0) {
+        return pathSegments[pathSegments.length - 1].trim();
+      }
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  // Handle relative paths e.g. /scan/rm-101
+  if (cleaned.includes('/')) {
+    const parts = cleaned.split('/').filter(Boolean);
+    if (parts.length > 0) {
+      return parts[parts.length - 1].trim();
+    }
+  }
+
+  return cleaned;
+}
+
 export type UserRole = 'Super Admin' | 'Organization Admin' | 'Inspector';
 
 export interface User {
