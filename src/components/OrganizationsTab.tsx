@@ -56,7 +56,7 @@ interface OrganizationsTabProps {
   
   // User CRUD callbacks
   onAddUser: (user: { username: string; email: string; fullName: string; role: 'Organization Admin' | 'Inspector'; organizationId?: string; password?: string }) => Promise<void>;
-  onUpdateUser: (id: string, updates: Partial<User>) => Promise<void>;
+  onUpdateUser: (id: string, updates: Partial<User> & { password?: string }) => Promise<void>;
   onDeleteUser: (id: string) => Promise<void>;
 }
 
@@ -597,8 +597,16 @@ export default function OrganizationsTab({
                                 onClick={async () => {
                                   const newPass = window.prompt(`Type a new login password for ${u.fullName}:`);
                                   if (newPass === null) return;
-                                  await onUpdateUser(u.id, { ...u, active: u.active } as any); // just touch/refresh profile
-                                  alert(`Credentials for @${u.username} reset successfully.`);
+                                  if (newPass.length < 8) {
+                                    alert('Password must be at least 8 characters long.');
+                                    return;
+                                  }
+                                  try {
+                                    await onUpdateUser(u.id, { password: newPass });
+                                    alert(`Credentials for @${u.username} reset successfully.`);
+                                  } catch (err: any) {
+                                    alert(err.message || 'Failed to reset credentials.');
+                                  }
                                 }}
                                 className="px-2 py-1 text-[10px] bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded font-bold text-gray-600"
                                 title="Reset credentials"

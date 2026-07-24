@@ -3130,11 +3130,11 @@ async function startServer() {
   });
 
   // Auth: Login
-  app.post('/api/auth/login', loginRateLimiter, validateRequest({ body: loginSchema }), (req, res) => {
+  app.post('/api/auth/login', loginRateLimiter, validateRequest({ body: loginSchema }), async (req, res) => {
     const { username, email, password, rememberMe } = req.body;
     
     // Support both username and email to be fully backwards compatible
-    const loginIdentifier = email || username;
+    const loginIdentifier = String(email || username || '').trim().toLowerCase();
     const rawIp = req.ip || req.headers['x-forwarded-for'] || 'unknown-ip';
     const ip = typeof rawIp === 'string' ? rawIp : (Array.isArray(rawIp) ? rawIp[0] : 'unknown-ip');
     const userAgent = req.headers['user-agent'] || 'unknown-device';
@@ -3150,21 +3150,44 @@ async function startServer() {
       return res.status(400).json({ error: 'Email/Username and Password are required.' });
     }
 
-    // Lookup user
-    const user = db.users.find(u => 
-      (u.email.toLowerCase() === loginIdentifier.toLowerCase() || 
-       u.username.toLowerCase() === loginIdentifier.toLowerCase())
+    // Lookup user in memory
+    let user = db.users.find(u => 
+      (u.email.toLowerCase() === loginIdentifier || 
+       u.username.toLowerCase() === loginIdentifier)
     );
+
+    // Fallback lookup in MongoDB if enabled and not in memory
+    if (!user && mongoEnabled && mongoDb) {
+      try {
+        const dbUser = await mongoDb.collection('users').findOne({
+          $or: [
+            { email: loginIdentifier },
+            { username: loginIdentifier }
+          ]
+        });
+        if (dbUser) {
+          user = { ...dbUser, id: dbUser.id || dbUser._id };
+          const idx = db.users.findIndex(u => u.id === user!.id);
+          if (idx !== -1) {
+            db.users[idx] = user;
+          } else {
+            db.users.push(user);
+          }
+        }
+      } catch (mongoErr) {
+        console.error('[Login Mongo Fallback Error]', mongoErr);
+      }
+    }
 
     // Timing attack prevention: dummy salt/hash comparison if user doesn't exist
     if (!user) {
       const dummySalt = '00000000000000000000000000000000';
-      hashPassword(password, dummySalt);
+      hashPassword(String(password).trim(), dummySalt);
       return res.status(401).json({ error: 'Invalid email, username, or password.' });
     }
 
     // Account active check
-    if (!user.active) {
+    if (user.active === false) {
       return res.status(403).json({ error: 'This account has been deactivated. Please contact your facility administrator.' });
     }
 
@@ -3179,7 +3202,8 @@ async function startServer() {
     // Verify Password
     const currentVersion = user.passwordVersion || 1;
     const iterations = currentVersion === 2 ? 100000 : 10000;
-    const computedHash = hashPassword(password, user.salt || '', iterations);
+    const cleanPassword = String(password).trim();
+    const computedHash = hashPassword(cleanPassword, user.salt || '', iterations);
     
     if (computedHash !== user.passwordHash) {
       user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
@@ -3200,7 +3224,7 @@ async function startServer() {
     if (currentVersion === 1) {
       const newSalt = generateSalt();
       user.salt = newSalt;
-      user.passwordHash = hashPassword(password, newSalt, 100000);
+      user.passwordHash = hashPassword(cleanPassword, newSalt, 100000);
       user.passwordVersion = 2;
       user.passwordChangedAt = new Date().toISOString();
       console.log(`[Security] Progressively upgraded user ${user.username} from Version 1 (10k) to Version 2 (100k iterations).`);
@@ -3221,7 +3245,7 @@ async function startServer() {
     user.lastLoginIp = String(ip);
     user.lastLoginDevice = userAgent;
 
-    dbUpdate('users', user.id, user);
+    await dbUpdate('users', user.id, user);
 
     // Generate Session Token
     const sessionToken = crypto.randomBytes(32).toString('hex');
@@ -3230,7 +3254,7 @@ async function startServer() {
       userId: user.id,
       expiresAt: sessionExpiry
     };
-    dbInsert('sessions', {
+    await dbInsert('sessions', {
       id: sessionToken,
       userId: user.id,
       expiresAt: sessionExpiry,
@@ -3242,7 +3266,7 @@ async function startServer() {
     // Exclude hashes from return object
     const { passwordHash, salt, ...safeUser } = user;
 
-    res.json({ 
+    return res.json({ 
       user: safeUser, 
       sessionToken,
       expiresAt: sessionExpiry
@@ -3365,7 +3389,7 @@ async function startServer() {
   });
 
   // Auth: Change Password (Internal for authenticated users)
-  app.post('/api/auth/change-password', requireAuth, validateRequest({ body: changePasswordSchema }), (req: any, res) => {
+  app.post('/api/auth/change-password', requireAuth, validateRequest({ body: changePasswordSchema }), async (req: any, res) => {
     const { currentPassword, newPassword } = req.body;
     const user = req.user;
 
@@ -3373,14 +3397,17 @@ async function startServer() {
       return res.status(400).json({ error: 'Current password and new password are required.' });
     }
 
+    const cleanCurrent = String(currentPassword).trim();
+    const cleanNew = String(newPassword).trim();
+
     const currentVersion = user.passwordVersion || 1;
     const iterations = currentVersion === 2 ? 100000 : 10000;
-    const computedHash = hashPassword(currentPassword, user.salt || '', iterations);
+    const computedHash = hashPassword(cleanCurrent, user.salt || '', iterations);
     if (computedHash !== user.passwordHash) {
       return res.status(400).json({ error: 'Current password is incorrect.' });
     }
 
-    if (!validatePasswordStrength(newPassword)) {
+    if (!validatePasswordStrength(cleanNew)) {
       return res.status(400).json({ 
         error: 'New password must be at least 8 characters, contain one uppercase letter, one lowercase letter, one number, and one special character.' 
       });
@@ -3388,43 +3415,59 @@ async function startServer() {
 
     const salt = generateSalt();
     user.salt = salt;
-    user.passwordHash = hashPassword(newPassword, salt, 100000);
+    user.passwordHash = hashPassword(cleanNew, salt, 100000);
     user.passwordVersion = 2;
     user.migrationVersion = 1;
     user.passwordChangedAt = new Date().toISOString();
 
-    dbUpdate('users', user.id, user);
+    await dbUpdate('users', user.id, user);
 
     logAction(user.id, user.username, 'Password Changed', 'User changed their account password successfully.');
     res.json({ success: true, message: 'Password changed successfully.' });
   });
 
   // Users lookup (Strict isolation)
-  app.get('/api/users', requireAuth, verifyAdminAccess, (req: any, res) => {
+  app.get('/api/users', requireAuth, verifyAdminAccess, async (req: any, res) => {
     const user = req.user;
     const { page, limit } = req.query;
     
-    let activeUsers = db.users.filter(u => !u.isDeleted);
+    let activeUsers: User[] = [];
+
+    if (mongoEnabled && mongoDb) {
+      try {
+        const query = user.role === 'Super Admin'
+          ? { isDeleted: { $ne: true } }
+          : { organizationId: user.organizationId, isDeleted: { $ne: true } };
+        const mongoUsers = await mongoDb.collection('users').find(query).toArray();
+        if (mongoUsers && mongoUsers.length > 0) {
+          activeUsers = mongoUsers.map((u: any) => ({ ...u, id: u.id || u._id }));
+          mongoUsers.forEach((u: any) => {
+            const mapped = { ...u, id: u.id || u._id };
+            const idx = db.users.findIndex(x => x.id === mapped.id);
+            if (idx !== -1) db.users[idx] = mapped;
+            else db.users.push(mapped);
+          });
+        } else {
+          activeUsers = db.users.filter(u => !u.isDeleted);
+        }
+      } catch (e) {
+        activeUsers = db.users.filter(u => !u.isDeleted);
+      }
+    } else {
+      activeUsers = db.users.filter(u => !u.isDeleted);
+    }
     
     if (user.role === 'Super Admin') {
       const safeUsers = activeUsers.map(({ passwordHash, salt, ...safe }) => safe);
       const paginated = paginateArray(safeUsers, page, limit);
-      if (paginated) {
-        res.json(paginated);
-      } else {
-        res.json(safeUsers);
-      }
+      return res.json(paginated || safeUsers);
     } else if (user.role === 'Organization Admin') {
       const filtered = activeUsers.filter(u => u.organizationId === user.organizationId);
       const safeUsers = filtered.map(({ passwordHash, salt, ...safe }) => safe);
       const paginated = paginateArray(safeUsers, page, limit);
-      if (paginated) {
-        res.json(paginated);
-      } else {
-        res.json(safeUsers);
-      }
+      return res.json(paginated || safeUsers);
     } else {
-      res.status(403).json({ error: 'Access denied.' });
+      return res.status(403).json({ error: 'Access denied.' });
     }
   });
 
@@ -3447,7 +3490,7 @@ async function startServer() {
         }
       }
 
-      const finalOrgId = operator.role === 'Super Admin' ? organizationId : operator.organizationId;
+      const finalOrgId = operator.role === 'Super Admin' ? (organizationId || undefined) : operator.organizationId;
 
       const exists = db.users.some(u => 
         u.username.toLowerCase() === username.trim().toLowerCase() || 
@@ -3478,7 +3521,7 @@ async function startServer() {
         fullName: fullName.trim(),
         role,
         active: true,
-        organizationId: finalOrgId || undefined,
+        organizationId: finalOrgId,
         avatarUrl: avatarUrl || `https://images.unsplash.com/photo-${1500000000000 + Math.floor(Math.random() * 1000000)}?w=100&auto=format&fit=crop`,
         passwordHash: hash,
         salt,
@@ -3500,7 +3543,7 @@ async function startServer() {
   });
 
   // Update User
-  app.put('/api/users/:id', requireAuth, verifyAdminAccess, validateRequest({ body: updateUserSchema }), (req: any, res) => {
+  app.put('/api/users/:id', requireAuth, verifyAdminAccess, validateRequest({ body: updateUserSchema }), async (req: any, res) => {
     const { id } = req.params;
     const { email, fullName, role, organizationId, active, avatarUrl, password } = req.body;
     const operator = req.user;
@@ -3531,19 +3574,22 @@ async function startServer() {
     let salt = targetUser.salt;
     let passwordVersion = targetUser.passwordVersion;
     if (password) {
-       if (!validatePasswordStrength(password)) {
-        return res.status(400).json({ 
-          error: 'Password must be at least 8 characters, contain one uppercase letter, one lowercase letter, one number, and one special character.' 
-        });
+      const cleanPass = String(password).trim();
+      if (cleanPass) {
+        if (!validatePasswordStrength(cleanPass)) {
+          return res.status(400).json({ 
+            error: 'Password must be at least 8 characters, contain one uppercase letter, one lowercase letter, one number, and one special character.' 
+          });
+        }
+        salt = generateSalt();
+        hash = hashPassword(cleanPass, salt, 100000);
+        passwordVersion = 2;
       }
-      salt = generateSalt();
-      hash = hashPassword(password, salt, 100000);
-      passwordVersion = 2;
     }
 
-    const updatedUser = {
+    const updatedUser: User = {
       ...targetUser,
-      ...(email !== undefined && { email: email.trim() }),
+      ...(email !== undefined && { email: email.trim().toLowerCase() }),
       ...(fullName !== undefined && { fullName: fullName.trim() }),
       ...(role !== undefined && ((operator.role === 'Super Admin' || operator.role === 'Organization Admin') ? { role } : {})),
       ...(organizationId !== undefined && (operator.role === 'Super Admin' ? { organizationId: organizationId || undefined } : {})),
@@ -3551,15 +3597,17 @@ async function startServer() {
       ...(avatarUrl !== undefined && { avatarUrl }),
       passwordHash: hash,
       salt,
-      passwordVersion
+      passwordVersion,
+      failedLoginAttempts: 0,
+      lockedUntil: undefined
     };
 
-    dbUpdate('users', id, updatedUser);
+    await dbUpdate('users', id, updatedUser);
 
     logAction(operator.id, operator.username, 'Update User', `Updated user details for: ${updatedUser.username}`);
 
     const { passwordHash: pHash, salt: uSalt, ...safeUser } = updatedUser;
-    res.json(safeUser);
+    return res.json(safeUser);
   });
 
   // Delete User
@@ -3914,7 +3962,7 @@ async function startServer() {
     }
   });
 
-  app.put('/api/organizations/:id', requireAuth, verifySuperAdminAccess, validateRequest({ body: updateOrganizationSchema }), (req: any, res) => {
+  app.put('/api/organizations/:id', requireAuth, verifySuperAdminAccess, validateRequest({ body: updateOrganizationSchema }), async (req: any, res) => {
     const { id } = req.params;
     const { name, code, address, contactEmail, active } = req.body;
     const operator = req.user;
@@ -3933,7 +3981,7 @@ async function startServer() {
       active: active !== undefined ? active : db.organizations[index].active
     };
 
-    dbUpdate('organizations', id, updatedOrg);
+    await dbUpdate('organizations', id, updatedOrg);
     logAction(operator.id, operator.username, 'Update Organization', `Modified organization properties for ID: ${id}`);
     res.json(updatedOrg);
   });
@@ -3966,18 +4014,40 @@ async function startServer() {
 
 
   // --- CRUD: BUILDINGS ---
-  app.get('/api/buildings', requireAuth, verifyAdminAccess, (req: any, res) => {
+  app.get('/api/buildings', requireAuth, verifyAdminAccess, async (req: any, res) => {
     const operator = req.user;
+
+    if (mongoEnabled && mongoDb) {
+      try {
+        const query = operator.role === 'Super Admin'
+          ? { isDeleted: { $ne: true } }
+          : { organizationId: operator.organizationId, isDeleted: { $ne: true } };
+        const mongoBlds = await mongoDb.collection('buildings').find(query).toArray();
+        if (mongoBlds && mongoBlds.length > 0) {
+          const mapped = mongoBlds.map((b: any) => ({ ...b, id: b.id || b._id }));
+          mongoBlds.forEach((b: any) => {
+            const item = { ...b, id: b.id || b._id };
+            const idx = db.buildings.findIndex(x => x.id === item.id);
+            if (idx !== -1) db.buildings[idx] = item;
+            else db.buildings.push(item);
+          });
+          return res.json(mapped);
+        }
+      } catch (err) {
+        console.error('[GET /api/buildings Mongo error]', err);
+      }
+    }
+
     const activeBuildings = db.buildings.filter(b => !b.isDeleted);
     if (operator.role === 'Super Admin') {
-      res.json(activeBuildings);
+      return res.json(activeBuildings);
     } else {
       const filtered = activeBuildings.filter(b => b.organizationId === operator.organizationId);
-      res.json(filtered);
+      return res.json(filtered);
     }
   });
 
-  app.post('/api/buildings', requireAuth, verifySuperAdminAccess, validateRequest({ body: createBuildingSchema }), (req: any, res) => {
+  app.post('/api/buildings', requireAuth, verifySuperAdminAccess, validateRequest({ body: createBuildingSchema }), async (req: any, res) => {
     const { organizationId, name, address } = req.body;
     const operator = req.user;
 
@@ -3989,12 +4059,12 @@ async function startServer() {
       createdAt: new Date().toISOString()
     };
 
-    dbInsert('buildings', newBuilding);
+    await dbInsert('buildings', newBuilding);
     logAction(operator.id, operator.username, 'Create Building', `Created building ${name}`);
-    res.json(newBuilding);
+    return res.json(newBuilding);
   });
 
-  app.put('/api/buildings/:id', requireAuth, verifySuperAdminAccess, validateRequest({ body: updateBuildingSchema }), (req: any, res) => {
+  app.put('/api/buildings/:id', requireAuth, verifySuperAdminAccess, validateRequest({ body: updateBuildingSchema }), async (req: any, res) => {
     const { id } = req.params;
     const { organizationId, name, address } = req.body;
     const operator = req.user;
@@ -4011,9 +4081,9 @@ async function startServer() {
       address: address !== undefined ? address : db.buildings[index].address
     };
 
-    dbUpdate('buildings', id, updatedBld);
+    await dbUpdate('buildings', id, updatedBld);
     logAction(operator.id, operator.username, 'Update Building', `Updated building properties for ID: ${id}`);
-    res.json(updatedBld);
+    return res.json(updatedBld);
   });
 
   app.delete('/api/buildings/:id', requireAuth, verifySuperAdminAccess, async (req: any, res) => {
@@ -4044,21 +4114,47 @@ async function startServer() {
 
 
   // --- CRUD: FLOORS ---
-  app.get('/api/floors', requireAuth, verifyAdminAccess, (req: any, res) => {
+  app.get('/api/floors', requireAuth, verifyAdminAccess, async (req: any, res) => {
     const operator = req.user;
+
+    if (mongoEnabled && mongoDb) {
+      try {
+        let docs: any[] = [];
+        if (operator.role === 'Super Admin') {
+          docs = await mongoDb.collection('floors').find({ isDeleted: { $ne: true } }).toArray();
+        } else {
+          const bldDocs = await mongoDb.collection('buildings').find({ organizationId: operator.organizationId, isDeleted: { $ne: true } }).toArray();
+          const bldIds = bldDocs.map((b: any) => b.id || b._id);
+          docs = await mongoDb.collection('floors').find({ buildingId: { $in: bldIds }, isDeleted: { $ne: true } }).toArray();
+        }
+        if (docs && docs.length > 0) {
+          const mapped = docs.map((f: any) => ({ ...f, id: f.id || f._id }));
+          docs.forEach((f: any) => {
+            const item = { ...f, id: f.id || f._id };
+            const idx = db.floors.findIndex(x => x.id === item.id);
+            if (idx !== -1) db.floors[idx] = item;
+            else db.floors.push(item);
+          });
+          return res.json(mapped);
+        }
+      } catch (err) {
+        console.error('[GET /api/floors Mongo error]', err);
+      }
+    }
+
     const activeFloors = db.floors.filter(f => !f.isDeleted);
     const activeBuildings = db.buildings.filter(b => !b.isDeleted);
     
     if (operator.role === 'Super Admin') {
-      res.json(activeFloors);
+      return res.json(activeFloors);
     } else {
       const myBuildings = activeBuildings.filter(b => b.organizationId === operator.organizationId).map(b => b.id);
       const filtered = activeFloors.filter(f => myBuildings.includes(f.buildingId));
-      res.json(filtered);
+      return res.json(filtered);
     }
   });
 
-  app.post('/api/floors', requireAuth, verifyAdminAccess, validateRequest({ body: createFloorSchema }), (req: any, res) => {
+  app.post('/api/floors', requireAuth, verifyAdminAccess, validateRequest({ body: createFloorSchema }), async (req: any, res) => {
     const { buildingId, name, level } = req.body;
     const operator = req.user;
 
@@ -4079,12 +4175,12 @@ async function startServer() {
       createdAt: new Date().toISOString()
     };
 
-    dbInsert('floors', newFloor);
+    await dbInsert('floors', newFloor);
     logAction(operator.id, operator.username, 'Create Floor', `Created floor level ${name}`);
-    res.json(newFloor);
+    return res.json(newFloor);
   });
 
-  app.put('/api/floors/:id', requireAuth, verifyAdminAccess, validateRequest({ body: updateFloorSchema }), (req: any, res) => {
+  app.put('/api/floors/:id', requireAuth, verifyAdminAccess, validateRequest({ body: updateFloorSchema }), async (req: any, res) => {
     const { id } = req.params;
     const { buildingId, name, level } = req.body;
     const operator = req.user;
@@ -4101,12 +4197,6 @@ async function startServer() {
       if (currentBuilding && currentBuilding.organizationId !== operator.organizationId) {
         return res.status(403).json({ error: 'Access denied: Target floor belongs to a different organization.' });
       }
-      if (buildingId) {
-        const targetBuilding = db.buildings.find(b => b.id === buildingId);
-        if (targetBuilding && targetBuilding.organizationId !== operator.organizationId) {
-          return res.status(403).json({ error: 'Access denied: New building belongs to a different organization.' });
-        }
-      }
     }
 
     const updatedFlr = {
@@ -4116,9 +4206,9 @@ async function startServer() {
       level: level !== undefined ? parseInt(level, 10) : db.floors[index].level
     };
 
-    dbUpdate('floors', id, updatedFlr);
-    logAction(operator.id, operator.username, 'Update Floor', `Modified floor parameters for ID: ${id}`);
-    res.json(updatedFlr);
+    await dbUpdate('floors', id, updatedFlr);
+    logAction(operator.id, operator.username, 'Update Floor', `Updated floor level parameters for ID: ${id}`);
+    return res.json(updatedFlr);
   });
 
   app.delete('/api/floors/:id', requireAuth, verifyAdminAccess, async (req: any, res) => {
@@ -4148,19 +4238,53 @@ async function startServer() {
 
 
   // --- CRUD: ROOMS & QR ASSIGNMENT ---
-  app.get('/api/rooms', requireAuth, (req: any, res) => {
+  app.get('/api/rooms', requireAuth, async (req: any, res) => {
     const operator = req.user;
+
+    if (mongoEnabled && mongoDb) {
+      try {
+        let docs: any[] = [];
+        if (operator.role === 'Super Admin') {
+          docs = await mongoDb.collection('rooms').find({ isDeleted: { $ne: true } }).toArray();
+        } else if (operator.role === 'Organization Admin') {
+          const bldDocs = await mongoDb.collection('buildings').find({ organizationId: operator.organizationId, isDeleted: { $ne: true } }).toArray();
+          const bldIds = bldDocs.map((b: any) => b.id || b._id);
+          const flrDocs = await mongoDb.collection('floors').find({ buildingId: { $in: bldIds }, isDeleted: { $ne: true } }).toArray();
+          const flrIds = flrDocs.map((f: any) => f.id || f._id);
+          docs = await mongoDb.collection('rooms').find({ floorId: { $in: flrIds }, isDeleted: { $ne: true } }).toArray();
+        } else {
+          const todayStr = new Date().toISOString().split('T')[0];
+          const todayAssignments = (db.assignments || []).filter(a => a.inspectorId === operator.id && a.date === todayStr);
+          const assignedRmIds = new Set<string>();
+          todayAssignments.forEach(asg => asg.roomIds.forEach(rid => assignedRmIds.add(rid)));
+          docs = await mongoDb.collection('rooms').find({ id: { $in: Array.from(assignedRmIds) }, isDeleted: { $ne: true } }).toArray();
+        }
+        if (docs && docs.length > 0) {
+          const mapped = docs.map((r: any) => ({ ...r, id: r.id || r._id }));
+          docs.forEach((r: any) => {
+            const item = { ...r, id: r.id || r._id };
+            const idx = db.rooms.findIndex(x => x.id === item.id);
+            if (idx !== -1) db.rooms[idx] = item;
+            else db.rooms.push(item);
+          });
+          return res.json(mapped);
+        }
+      } catch (err) {
+        console.error('[GET /api/rooms Mongo error]', err);
+      }
+    }
+
     const activeRooms = db.rooms.filter(r => !r.isDeleted);
     const activeBuildings = db.buildings.filter(b => !b.isDeleted);
     const activeFloors = db.floors.filter(f => !f.isDeleted);
     
     if (operator.role === 'Super Admin') {
-      res.json(activeRooms);
+      return res.json(activeRooms);
     } else if (operator.role === 'Organization Admin') {
       const myBuildings = activeBuildings.filter(b => b.organizationId === operator.organizationId).map(b => b.id);
       const myFloors = activeFloors.filter(f => myBuildings.includes(f.buildingId)).map(f => f.id);
       const filtered = activeRooms.filter(r => myFloors.includes(r.floorId));
-      res.json(filtered);
+      return res.json(filtered);
     } else {
       // Inspectors only see their assigned rooms for today
       const todayStr = new Date().toISOString().split('T')[0];
@@ -4168,7 +4292,7 @@ async function startServer() {
       const assignedRmIds = new Set<string>();
       todayAssignments.forEach(asg => asg.roomIds.forEach(rid => assignedRmIds.add(rid)));
       const filtered = activeRooms.filter(r => assignedRmIds.has(r.id));
-      res.json(filtered);
+      return res.json(filtered);
     }
   });
 
@@ -4235,7 +4359,7 @@ async function startServer() {
     }
   });
 
-  app.put('/api/rooms/:id', requireAuth, verifyAdminAccess, validateRequest({ body: updateRoomSchema }), (req: any, res) => {
+  app.put('/api/rooms/:id', requireAuth, verifyAdminAccess, validateRequest({ body: updateRoomSchema }), async (req: any, res) => {
     const { id } = req.params;
     const { name, type, floorId, buildingId } = req.body;
     const operator = req.user;
@@ -4261,9 +4385,9 @@ async function startServer() {
       buildingId: buildingId || db.rooms[index].buildingId
     };
 
-    dbUpdate('rooms', id, updatedRm);
+    await dbUpdate('rooms', id, updatedRm);
     logAction(operator.id, operator.username, 'Update Room', `Updated parameters for Room ID: ${id}`);
-    res.json(updatedRm);
+    return res.json(updatedRm);
   });
 
   app.delete('/api/rooms/:id', requireAuth, verifyAdminAccess, async (req: any, res) => {
