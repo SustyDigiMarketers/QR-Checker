@@ -55,7 +55,7 @@ interface OrganizationsTabProps {
   onTriggerSheetsSync: () => Promise<{ success: boolean; syncedCount: number; sheetId: string }>;
   
   // User CRUD callbacks
-  onAddUser: (user: { username: string; email: string; fullName: string; role: 'Organization Admin' | 'Inspector'; organizationId?: string }) => Promise<void>;
+  onAddUser: (user: { username: string; email: string; fullName: string; role: 'Organization Admin' | 'Inspector'; organizationId?: string; password?: string }) => Promise<void>;
   onUpdateUser: (id: string, updates: Partial<User>) => Promise<void>;
   onDeleteUser: (id: string) => Promise<void>;
 }
@@ -185,7 +185,8 @@ export default function OrganizationsTab({
         username: staffUsername.trim().toLowerCase(),
         email: staffEmail.trim(),
         role,
-        organizationId: activeOrgId || undefined
+        organizationId: activeOrgId || undefined,
+        password: staffPassword.trim() || undefined
       });
 
       setIsAddingStaff(false);

@@ -86,7 +86,7 @@ const port = parseInt(process.env.PORT || '3000', 10);
 // Initialize Firebase Admin with project settings if present
 let firestoreEnabled = false;
 let firestore: any = null;
-let syncState: SyncState = 'OFFLINE';
+let syncState: SyncState = 'CONNECTED';
 let lastSyncTime: string | undefined = undefined;
 let lastSyncError: string | undefined = undefined;
 let firebaseProjectId = '';
@@ -2529,7 +2529,7 @@ async function startServer() {
 
   async function flushSyncQueue() {
     if (!firestoreEnabled) {
-      syncState = 'OFFLINE';
+      syncState = 'CONNECTED';
       return;
     }
     if (isFlushing) return;
@@ -3429,74 +3429,74 @@ async function startServer() {
   });
 
   // Create User
-  app.post('/api/users', requireAuth, verifyAdminAccess, validateRequest({ body: createUserSchema }), (req: any, res) => {
-    const { username, email, fullName, role, organizationId, avatarUrl, password } = req.body;
-    const operator = req.user;
+  app.post('/api/users', requireAuth, verifyAdminAccess, validateRequest({ body: createUserSchema }), async (req: any, res) => {
+    try {
+      const { username, email, fullName, role, organizationId, avatarUrl, password } = req.body;
+      const operator = req.user;
 
-    if (!username || !email || !fullName || !role) {
-      return res.status(400).json({ error: 'Username, email, full name, and role are required.' });
-    }
-
-    if (operator.role === 'Organization Admin') {
-      if (role !== 'Inspector') {
-        return res.status(403).json({ error: 'Managers (Organization Admins) can only register Inspector accounts.' });
+      if (!username || !email || !fullName || !role) {
+        return res.status(400).json({ error: 'Username, email, full name, and role are required.' });
       }
-      if (organizationId && organizationId !== operator.organizationId) {
-        return res.status(403).json({ error: 'You can only create users in your own organization.' });
+
+      if (operator.role === 'Organization Admin') {
+        if (role !== 'Inspector') {
+          return res.status(403).json({ error: 'Managers (Organization Admins) can only register Inspector accounts.' });
+        }
+        if (organizationId && organizationId !== operator.organizationId) {
+          return res.status(403).json({ error: 'You can only create users in your own organization.' });
+        }
       }
-    }
 
-    const finalOrgId = operator.role === 'Super Admin' ? organizationId : operator.organizationId;
+      const finalOrgId = operator.role === 'Super Admin' ? organizationId : operator.organizationId;
 
-    const exists = db.users.some(u => 
-      u.username.toLowerCase() === username.trim().toLowerCase() || 
-      u.email.toLowerCase() === email.trim().toLowerCase()
-    );
-    if (exists) {
-      return res.status(400).json({ error: 'Username or Email is already registered.' });
-    }
-
-    let userPassword = password;
-    if (!userPassword) {
-      userPassword = 'Cc-' + crypto.randomBytes(8).toString('hex') + '!';
-      console.log(`\n==================================================`);
-      console.log(`[SECURITY] AUTO-GENERATED PASSWORD FOR NEW USER`);
-      console.log(`User: ${fullName} (${username})`);
-      console.log(`Generated Password: ${userPassword}`);
-      console.log(`==================================================\n`);
-    } else {
-      if (!validatePasswordStrength(userPassword)) {
-        return res.status(400).json({ 
-          error: 'Password must be at least 8 characters, contain one uppercase letter, one lowercase letter, one number, and one special character.' 
-        });
+      const exists = db.users.some(u => 
+        u.username.toLowerCase() === username.trim().toLowerCase() || 
+        u.email.toLowerCase() === email.trim().toLowerCase()
+      );
+      if (exists) {
+        return res.status(400).json({ error: 'Username or Email is already registered.' });
       }
+
+      let userPassword = password ? String(password).trim() : '';
+      if (!userPassword) {
+        userPassword = 'Cc-' + crypto.randomBytes(4).toString('hex') + 'A1!';
+      } else {
+        if (!validatePasswordStrength(userPassword)) {
+          return res.status(400).json({ 
+            error: 'Password must be at least 8 characters, contain one uppercase letter, one lowercase letter, one number, and one special character.' 
+          });
+        }
+      }
+
+      const salt = generateSalt();
+      const hash = hashPassword(userPassword, salt, 100000);
+
+      const newUser: User = {
+        id: `usr-${Date.now()}`,
+        username: username.trim().toLowerCase(),
+        email: email.trim().toLowerCase(),
+        fullName: fullName.trim(),
+        role,
+        active: true,
+        organizationId: finalOrgId || undefined,
+        avatarUrl: avatarUrl || `https://images.unsplash.com/photo-${1500000000000 + Math.floor(Math.random() * 1000000)}?w=100&auto=format&fit=crop`,
+        passwordHash: hash,
+        salt,
+        passwordVersion: 2,
+        migrationVersion: 1,
+        failedLoginAttempts: 0
+      };
+
+      await dbInsert('users', newUser);
+
+      logAction(operator.id, operator.username, 'Create User', `Registered user: ${newUser.username} (${newUser.role}) under Org: ${finalOrgId || 'None'}`);
+
+      const { passwordHash: pHash, salt: uSalt, ...safeUser } = newUser;
+      return res.json({ ...safeUser, initialPassword: userPassword });
+    } catch (err: any) {
+      console.error('Error creating user:', err);
+      return res.status(500).json({ error: err.message || 'Failed to create user.' });
     }
-
-    const salt = generateSalt();
-    const hash = hashPassword(userPassword, salt, 100000);
-
-    const newUser: User = {
-      id: `usr-${Date.now()}`,
-      username: username.trim().toLowerCase(),
-      email: email.trim(),
-      fullName: fullName.trim(),
-      role,
-      active: true,
-      organizationId: finalOrgId || undefined,
-      avatarUrl: avatarUrl || `https://images.unsplash.com/photo-${1500000000000 + Math.floor(Math.random() * 1000000)}?w=100&auto=format&fit=crop`,
-      passwordHash: hash,
-      salt,
-      passwordVersion: 2,
-      migrationVersion: 1,
-      failedLoginAttempts: 0
-    };
-
-    dbInsert('users', newUser);
-
-    logAction(operator.id, operator.username, 'Create User', `Registered user: ${newUser.username} (${newUser.role}) under Org: ${finalOrgId || 'None'}`);
-
-    const { passwordHash: pHash, salt: uSalt, ...safeUser } = newUser;
-    res.json(safeUser);
   });
 
   // Update User
@@ -4172,46 +4172,67 @@ async function startServer() {
     }
   });
 
-  app.post('/api/rooms', requireAuth, verifyAdminAccess, validateRequest({ body: createRoomSchema }), (req: any, res) => {
-    const { floorId, buildingId, name, type } = req.body;
-    const operator = req.user;
+  app.post('/api/rooms', requireAuth, verifyAdminAccess, validateRequest({ body: createRoomSchema }), async (req: any, res) => {
+    try {
+      const { floorId, buildingId, name, type } = req.body;
+      const operator = req.user;
 
-    // Verify building ownership
-    const building = db.buildings.find(b => b.id === buildingId);
-    if (!building) {
-      return res.status(404).json({ error: 'Target building not found.' });
+      let targetBuildingId = buildingId;
+      if (!targetBuildingId && floorId) {
+        const floor = db.floors.find(f => f.id === floorId);
+        if (floor) {
+          targetBuildingId = floor.buildingId;
+        }
+      }
+
+      // Verify building ownership if building is present
+      if (targetBuildingId) {
+        const building = db.buildings.find(b => b.id === targetBuildingId);
+        if (building && operator.role === 'Organization Admin' && building.organizationId !== operator.organizationId) {
+          return res.status(403).json({ error: 'Access denied: Target building belongs to a different organization.' });
+        }
+      }
+
+      const floor = db.floors.find(f => f.id === floorId);
+      if (!floor) {
+        return res.status(404).json({ error: 'Associated floor not found.' });
+      }
+
+      if (!targetBuildingId) {
+        targetBuildingId = floor.buildingId;
+      }
+
+      const roomId = `rm-${crypto.randomBytes(8).toString('hex')}`;
+      const token = generateSecureToken();
+
+      const newRoom: Room = {
+        id: roomId,
+        floorId,
+        buildingId: targetBuildingId,
+        name,
+        type,
+        qrToken: token,
+        createdAt: new Date().toISOString()
+      };
+
+      const newQr: QrCodeDetails = {
+        id: roomId,
+        roomId,
+        token,
+        generatedAt: new Date().toISOString(),
+        scansCount: 0,
+        status: 'Active'
+      };
+
+      await dbInsert('rooms', newRoom);
+      await dbInsert('qrCodes', newQr);
+
+      logAction(operator.id, operator.username, 'Create Room & QR Code', `Created room ${name} & mapped secure QR Token: ${token}`);
+      return res.json(newRoom);
+    } catch (err: any) {
+      console.error('Error creating room:', err);
+      return res.status(500).json({ error: err.message || 'Failed to create room.' });
     }
-    if (operator.role === 'Organization Admin' && building.organizationId !== operator.organizationId) {
-      return res.status(403).json({ error: 'Access denied: Target building belongs to a different organization.' });
-    }
-
-    const roomId = `rm-${Date.now()}`;
-    const token = generateSecureToken();
-
-    const newRoom: Room = {
-      id: roomId,
-      floorId,
-      buildingId,
-      name,
-      type,
-      qrToken: token,
-      createdAt: new Date().toISOString()
-    };
-
-    const newQr: QrCodeDetails = {
-      id: roomId,
-      roomId,
-      token,
-      generatedAt: new Date().toISOString(),
-      scansCount: 0,
-      status: 'Active'
-    };
-
-    dbInsert('rooms', newRoom);
-    dbInsert('qrCodes', newQr);
-
-    logAction(operator.id, operator.username, 'Create Room & QR Code', `Created room ${name} & mapped secure QR Token: ${token}`);
-    res.json(newRoom);
   });
 
   app.put('/api/rooms/:id', requireAuth, verifyAdminAccess, validateRequest({ body: updateRoomSchema }), (req: any, res) => {

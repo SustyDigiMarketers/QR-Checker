@@ -602,7 +602,10 @@ export default function App() {
         body: JSON.stringify({ ...rm })
       });
 
-      if (!response.ok) throw new Error('Failed to create room');
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || errData.message || 'Failed to create room');
+      }
       triggerToast(`Room ${rm.name} created & secure QR code badged!`);
       await fetchAllData();
     } catch (err: any) {
@@ -833,7 +836,7 @@ export default function App() {
   };
 
   // Users CRUD
-  const handleAddUser = async (user: { username: string; email: string; fullName: string; role: string; organizationId?: string }) => {
+  const handleAddUser = async (user: { username: string; email: string; fullName: string; role: string; organizationId?: string; password?: string }) => {
     setIsProcessing(true);
     try {
       const response = await fetch('/api/users', {
@@ -843,11 +846,13 @@ export default function App() {
       });
 
       if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.error || 'Failed to register user');
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || err.message || 'Failed to register user');
       }
 
-      triggerToast(`Staff member ${user.fullName} registered successfully!`);
+      const resData = await response.json();
+      const initialPwdMsg = resData.initialPassword ? ` (Initial Password: ${resData.initialPassword})` : '';
+      triggerToast(`Staff member ${user.fullName} registered successfully!${initialPwdMsg}`);
       await fetchAllData();
     } catch (err: any) {
       alert(err.message);

@@ -17,9 +17,11 @@ export function validateRequest(schemas: { body?: z.ZodSchema; query?: z.ZodSche
       next();
     } catch (error: any) {
       if (error instanceof z.ZodError) {
+        const errorDetails = error.issues.map(err => `${err.path.join('.')}: ${err.message}`).join(', ');
         return res.status(400).json({
           success: false,
           message: 'Validation failed',
+          error: `Validation error: ${errorDetails}`,
           code: 'VALIDATION_ERROR',
           errors: error.issues.map(err => ({
             field: err.path.join('.'),
@@ -108,24 +110,28 @@ export const updateBuildingSchema = z.object({
 // 5. Floor Schemas
 export const createFloorSchema = z.object({
   name: z.string().min(1, 'Floor name is required'),
-  buildingId: z.string().min(1, 'Building reference is required')
+  buildingId: z.string().min(1, 'Building reference is required'),
+  level: z.union([z.number(), z.string()]).optional()
 });
 
 export const updateFloorSchema = z.object({
   name: z.string().min(1, 'Floor name is required').optional(),
-  buildingId: z.string().optional()
+  buildingId: z.string().optional(),
+  level: z.union([z.number(), z.string()]).optional()
 });
 
 // 6. Room Schemas
 export const createRoomSchema = z.object({
   name: z.string().min(1, 'Room name is required'),
   floorId: z.string().min(1, 'Floor reference is required'),
+  buildingId: z.string().optional(),
   type: z.string().min(1, 'Room type is required')
 });
 
 export const updateRoomSchema = z.object({
   name: z.string().min(1, 'Room name is required').optional(),
   floorId: z.string().optional(),
+  buildingId: z.string().optional(),
   type: z.string().optional()
 });
 
